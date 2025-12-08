@@ -1,0 +1,1297 @@
+<import name="input-method" src="../components/InputMethod/InputMethod.ux"></import>
+
+<template>
+  <div class="page">
+    <!-- 时间显示 -->
+    <div class="time-display" onclick="scrollToTop">
+      <text class="time-text">{{currentTime}}</text>
+    </div>
+    
+    <!-- 顶部导航栏 -->
+    <div class="header">
+      <input type="button" class="back-btn" value="<" onclick="back"/>
+      <div class="header-buttons">
+        <input type="button" class="menu-btn" value="···" onclick="showMenu"/>
+      </div>
+    </div>
+    
+    <!-- 主内容区域 -->
+    <div class="main-content">
+      <!-- 电子书式滚动显示区域 -->
+      <scroll id="textScroll"
+        class="text-scroll"
+        scroll-y="true"
+        @scroll="onScroll"
+        @touchstart="onTouchStart"
+        bounces="true"
+        style="padding: {{borderWidth}};"
+        @touchmove="onTouchMove"
+        @touchend="onTouchEnd">
+        
+        <div class="content-wrapper">
+          <!-- 文本内容显示区域 -->
+          <div class="text-content-area">
+            <text class="display-text">
+              {{getTextBeforeCursor()}}
+              <span if="cursorPosition === currentText.length" style="color:{{showCursor ? '#FFFFFF' : '#000000'}};">|</span>
+              <span style="color:#888888;">{{getTextAfterCursor()}}</span>
+            </text>
+            <div class="safe-area0" if="{{autoScrollType === 'oneBlank'}}"></div>
+          <div class="safe-area1" if="{{autoScrollType === 'twoBlank'}}"></div>
+            <div id="safeArea2" class="safe-area2" if="hideInput"></div>
+          </div>
+        </div>
+      </scroll>
+      
+      <!-- 输入法区域 -->
+      <div class="input-method-container" if="!hideInput"></div>
+        <input-method
+          id="inputMethod"
+          hide="{{hideInput}}"
+          vibratemode="{{vibrateMode}}"
+          @delete="onDelete"
+          @complete="onInputComplete"
+        ></input-method>
+    </div>
+    
+    <!-- 菜单对话框 -->
+    <div class="dialog-overlay" if="showMenuDialog">
+      <div class="menu-dialog">
+        <text class="dialog-title">操作选项</text>
+        <div class="menu-options">
+          <input type="button" class="menu-option" value="保存" onclick="saveNote"/>
+          <input type="button" class="menu-option" value="生成二维码" onclick="showQRCode"/>
+          <input type="button" class="menu-option delete-option" value="删除" onclick="deleteNote" if="isEdit"/>
+          <input type="button" class="menu-option cancel-option" value="取消" onclick="cancelMenu"/>
+        </div>
+      </div>
+    </div>
+    
+    <!-- 删除确认对话框 -->
+    <div class="dialog-overlay" if="showConfirmDialog">
+      <div class="confirm-dialog">
+        <text class="dialog-title">确认删除</text>
+        <text class="dialog-message">确定要删除这条笔记吗？</text>
+        <div class="dialog-buttons">
+          <input type="button" class="dialog-button cancel-button" value="否" onclick="cancelDelete"/>
+          <input type="button" class="dialog-button confirm-button" value="是" onclick="confirmDelete"/>
+        </div>
+      </div>
+    </div>
+    
+    <!-- 二维码对话框 -->
+    <div class="dialog-overlay" if="showQRDialog">
+      <div class="qr-dialog">
+        <text class="dialog-title">笔记内容二维码</text>
+        <qrcode class="qr-code" value="{{noteContentForQR}}" />
+        <input type="button" class="dialog-button" value="确定" onclick="closeQRDialog"/>
+      </div>
+    </div>
+    
+    <!-- 退出确认对话框 -->
+    <div class="dialog-overlay" if="showExitConfirm">
+      <div class="confirm-dialog">
+        <text class="dialog-title">确认退出</text>
+        <text class="dialog-message">笔记尚未保存，确定要退出吗？</text>
+        <div class="dialog-buttons">
+          <input type="button" class="dialog-button cancel-button" value="取消" onclick="cancelExit"/>
+          <input type="button" class="dialog-button confirm-button" value="确定" onclick="confirmExit"/>
+        </div>
+      </div>
+    </div>
+  </div>
+</template>
+
+<style>
+.page {
+  flex-direction: column;
+  background-color: #000000;
+  width: 100%;
+  height: 100%;
+}
+
+.time-display {
+  height: 24px;
+  justify-content: center;
+  align-items: center;
+  border-radius: 12px; /* 添加圆角 */
+  margin: 5px;
+  padding: 5px;
+}
+
+.time-text {
+  font-size: 20px;
+  font-weight: bold;
+  color: #999999;
+}
+
+.header {
+  height: 60px;
+  padding-left: 20px;
+  padding-right: 20px;
+  border-bottom-width: 2px;
+  border-bottom-color: #333333;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.back-btn,.menu-btn {
+  width: 80px;
+  height: 50px;
+  margin-left: 5px;
+  margin-right: 5px;
+  background-color: rgb(38,38,38);
+  color: #ffffff;
+  font-size: 24px;
+  border-radius: 12px; /* 添加圆角 */
+  border: 3px solid rgba(255,255,255,0.06); /* 添加边框 */
+}
+
+.header-buttons {
+  flex-direction: row;
+  align-items: center;
+}
+
+
+.main-content {
+  flex: 1;
+  flex-direction: column;
+  width: 100%;
+}
+
+.text-scroll {
+  width: 100%;
+  flex: 1; /* 使用 flex: 1 自动占据剩余空间并可调整大小 */
+  min-height: 103px; /* 减小最小高度，为输入法留出空间 */
+  flex-direction: column;
+  overflow: auto; /* 确保滚动行为正常 */
+}
+
+.content-wrapper {
+  width: 100%;
+  flex-direction: column;
+}
+
+.text-content-area {
+  flex-direction: column;
+  position: relative;
+}
+
+.text-container {
+  position: relative;
+  width: 100%;
+}
+
+.display-text {
+  width: 100%;
+  text-align: left;
+  color: #ffffff;
+  font-size: 26px;
+  line-height: 34px;
+  word-wrap: break-word;
+  white-space: pre-wrap; /* Preserve whitespace and line breaks */
+  overflow-wrap: break-word;
+}
+
+.safe-area0 {
+  height: 34px;
+}
+
+.safe-area1 {
+  height: 68px;
+}
+
+.safe-area2 {
+  height: 100px;
+}
+
+.cursor-layer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 2;
+}
+
+.cursor {
+  position: absolute;
+  width: 2px;
+  height: 34px;
+  background-color: #ffffff;
+  animation: blink 1s infinite;
+  transform: translateX(-1px);
+}
+
+@keyframes blink {
+  0%, 50%, 100% {
+    opacity: 1;
+  }
+  25%, 75% {
+    opacity: 0;
+  }
+}
+
+.input-method-container {
+  width: 100%;
+  height: 307px;
+  background-color: #333333;
+  position: relative; /* 确保输入法区域正确显示 */
+  z-index: 10; /* 确保输入法在最上层 */
+}
+
+.dialog-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background-color: rgba(0, 0, 0, 0.7);
+  justify-content: center;
+  align-items: center;
+  border:3px solid rgba(255,255,255,0.06);
+}
+
+.menu-dialog {
+  width: 85%;
+  background-color: #1f1f1f;
+  border: 3px solid rgba(255,255,255,0.06); /* 修改边框样式 */
+  border-radius: 12px; /* 修改圆角 */
+  padding: 20px;
+  flex-direction: column;
+}
+
+.dialog-title {
+  font-size: 28px;
+  color: #ffffff;
+  text-align: center;
+  margin-bottom: 20px;
+}
+
+.menu-options {
+  flex-direction: column;
+}
+
+.menu-option {
+  width: 100%;
+  height: 50px;
+  font-size: 24px;
+  border-radius: 12px; /* 修改圆角 */
+  background-color: #262626; /* 修改背景色 */
+  border: 3px solid rgba(255,255,255,0.06); /* 添加边框 */
+  color: #ffffff;
+  margin-bottom: 10px;
+  text-align: center;
+}
+
+.delete-option {
+  background-color: #ff0000;
+}
+
+.cancel-option {
+  background-color: #666666;
+}
+
+.confirm-dialog {
+  width: 90%;
+  background-color: #1f1f1f;
+  border: 3px solid rgba(255,255,255,0.06); /* 修改边框样式 */
+  border-radius: 12px; /* 修改圆角 */
+  padding: 20px;
+  flex-direction: column;
+}
+
+.dialog-message {
+  font-size: 24px;
+  color: #ffffff;
+  text-align: center;
+  margin-bottom: 20px;
+}
+
+.dialog-buttons {
+  flex-direction: column;
+  justify-content: space-around;
+  color: #ffffff
+}
+
+.dialog-button {
+  width: 100%;
+  font-size: 24px;
+  border-radius: 12px; /* 修改圆角 */
+  background-color: #262626; /* 修改背景色 */
+  border: 3px solid rgba(255,255,255,0.06); /* 添加边框 */
+  color:#ffffff;
+  margin-bottom: 10px;
+}
+
+.cancel-button {
+  height: 80px;
+}
+
+.confirm-button {
+  background-color: #ff0000;
+  height: 60px;
+  margin-bottom: 0;
+}
+
+.qr-dialog {
+  width: 95%;
+  background-color: #1f1f1f;
+  border: 3px solid rgba(255,255,255,0.06); /* 修改边框样式 */
+  border-radius: 12px; /* 修改圆角 */
+  padding: 6px;
+  flex-direction: column;
+  align-items: center;
+}
+
+.qr-code {
+  width: 180px;
+  height: 180px;
+  margin: 10px 0;
+}
+</style>
+
+<script>
+import router from '@system.router'
+import file from '@system.file'
+import prompt from '@system.prompt'
+import vibrator from '@system.vibrator'
+import { getCachedSettings, notifyNotesChange, readMetadata, saveNoteFile, saveMetadata } from '../Common/utils.js'
+
+export default {
+  private: {
+    // 基础属性
+    index: -1,
+    content: '',
+    isEdit: false,
+    hideInput: false,
+    currentText: '',
+    isSaved: true,
+    isSaving: false,
+    vibrateMode: 'short',
+    currentTime: "",
+    borderWidth: '10px', // 默认边框宽度
+    
+    // 对话框控制
+    showMenuDialog: false,
+    showConfirmDialog: false,
+    showQRDialog: false,
+    showExitConfirm: false,
+        
+    // 光标相关
+    showCursor: true,
+    
+    // 主定时器
+    mainTimer: null,
+    // 定时器计数器
+    timeUpdateCounter: 0,   // 用于每10秒更新时间
+    
+    // 操作计数器（用于恢复文件）
+    operationCounter: 0,
+    maxOperationsBeforeRecovery: 5,
+    
+    // 二维码内容
+    noteContentForQR: '',
+        
+    // 自动滚动设置
+    autoScrollType: 'oneBlank', // 默认为留空1行
+    
+    // 设置加载状态
+    vibrationSettingLoaded: false,
+    autoScrollSettingLoaded: false,
+    borderWidthSettingLoaded: false,
+    allSettingsLoaded: false,
+    settingsLoadedCallback: null,
+    
+    // 光标位置相关
+    cursorPosition: 0, // 光标位置，默认在末尾
+    
+    // 触摸事件相关
+    touchStartX: 0,
+    touchStartY: 0,
+    touchStartTime: 0,
+    lastTouchX: 0,
+    lastTouchY: 0,
+    isTouchMoving: false,
+    maxMoveDistance: 0, // 记录最大移动距离
+    touchStartPosition: 0, // 记录触摸开始时光标的位置
+    
+    // 恢复文件相关
+    lastSavedRecoveryText: '', // 上次保存的恢复文本内容
+  },
+  
+  onInit() {
+    try {
+      // 初始化设置
+      this.loadVibrationSetting();
+      this.loadAutoScrollSetting();
+      this.loadBorderWidthSetting(); // 加载边框宽度设置
+      
+      // 设置编辑状态
+      if (this.index >= 0) {
+        this.isEdit = true;
+      }
+      
+      // 默认显示输入法
+      this.hideInput = false;
+      
+      // 初始化当前时间
+      this.updateCurrentTime();
+      
+      // 初始化文本内容
+      if (this.content) {
+        // 解析笔记内容，只提取文本部分（去除时间戳）
+        const parts = this.content.split('|');
+        this.currentText = parts[0] || this.content;
+      } else {
+        this.currentText = "";
+      }
+      
+      // 初始化光标位置在末尾
+      this.cursorPosition = this.currentText.length;
+      
+      // 启动光标闪烁
+      this.startCursorBlink();
+      
+      console.log("编辑器初始化完成");
+    } catch (e) {
+      console.error('初始化页面时出错:', e);
+      // 设置默认值以确保页面可以正常运行
+      this.currentText = "";
+      this.hideInput = false;
+    }
+  },
+  
+  onReady() {
+    try {
+      console.log("页面准备完成");
+      // 确保文本内容渲染完成
+      this.$nextTick(() => {
+        // 确保在所有设置加载完成后才执行滚动
+        this.ensureSettingsLoaded(() => {
+          // 延迟执行滚动到底部操作，确保文本渲染完成
+          setTimeout(() => {
+            try {
+              this.scrollToBottom();
+            } catch (e) {
+              console.warn('页面加载后滚动到底部失败:', e);
+            }
+          }, 100);
+        });
+      });
+    } catch (e) {
+      console.error('onReady方法出错:', e);
+    }
+  },
+  
+  onShow() {
+    try {
+      // 更新当前时间
+      this.updateCurrentTime();
+      
+      // 启动主定时器
+      this.startMainTimer();
+    } catch (e) {
+      console.error('onShow方法出错:', e);
+    }
+  },
+  
+  onHide() {
+    // 清除定时器
+    this.clearAllTimers();
+  },
+  
+  onDestroy() {
+    // 清除所有定时器
+    this.clearAllTimers();
+    
+    // 页面销毁时清除恢复文件
+    this.clearRecoveryFile();
+  },
+  
+  // 清除所有定时器
+  clearAllTimers() {
+    if (this.mainTimer) {
+      clearInterval(this.mainTimer);
+      this.mainTimer = null;
+    }
+  },
+  
+  // 启动光标闪烁
+  startCursorBlink() {
+    // 光标闪烁现在由主定时器控制，这里不需要单独启动
+    console.log('光标闪烁将由主定时器控制');
+  },
+  
+  // 启动主定时器（400ms间隔）
+  startMainTimer() {
+    // 清除已存在的主定时器
+    if (this.mainTimer) {
+      clearInterval(this.mainTimer);
+      this.mainTimer = null;
+    }
+    
+    // 初始化计数器
+    this.timeUpdateCounter = 0;
+    this.operationCounter = 0;
+    
+    // 启动主定时器，每400ms执行一次
+    this.mainTimer = setInterval(() => {
+      try {
+        // 每400ms执行的任务
+        this.timeUpdateCounter++;
+        
+        // 光标闪烁（每400ms切换一次）
+        this.showCursor = !this.showCursor;
+        
+        // 每10秒更新时间显示并保存恢复文件
+        if (this.timeUpdateCounter >= 25) { // 25 * 400ms = 10000ms
+          this.updateCurrentTime();
+          this.checkAndSaveRecovery();
+          this.timeUpdateCounter = 0;
+        }
+      } catch (e) {
+        console.warn('主定时器任务执行失败:', e);
+      }
+    }, 400);
+  },
+  
+  // 增加操作计数器并在达到阈值时保存恢复文件
+  incrementOperationCounter() {
+    this.operationCounter++;
+    if (this.operationCounter >= this.maxOperationsBeforeRecovery) {
+      this.checkAndSaveRecovery();
+      this.operationCounter = 0;
+    }
+  },
+  
+  // 更新当前时间
+  updateCurrentTime() {
+    const now = new Date();
+    const hour = now.getHours().toString().padStart(2, '0');
+    const minute = now.getMinutes().toString().padStart(2, '0');
+    this.currentTime = `${hour}:${minute}`;
+  },
+  
+  // 切换输入法显示状态
+  toggleInputMethod() {
+    try {
+      this.checkVibrationSetting(() => {
+        if (this.vibrateMode) {
+          try {
+            vibrator.vibrate({
+              mode: this.vibrateMode
+            });
+          } catch (e) {
+            console.warn('振动功能调用失败:', e);
+          }
+        }
+      });
+      this.hideInput = !this.hideInput;
+            
+    } catch (e) {
+      console.error('切换输入法显示状态时出错:', e);
+    }
+    console.log('切换输入法显示状态成功');
+    this.$nextTick(() => {
+      if (!this.hideInput) {
+        this.scrollToBottom()
+      }
+    })
+    
+  },
+  
+  // 获取光标前的文本
+  getTextBeforeCursor() {
+    if (this.currentText && this.cursorPosition > 0) {
+      return this.currentText.substring(0, this.cursorPosition);
+    }
+    return '';
+  },
+  
+  // 获取光标后的文本
+  getTextAfterCursor() {
+    if (this.currentText && this.cursorPosition < this.currentText.length) {
+      return this.currentText.substring(this.cursorPosition);
+    }
+    return '';
+  },
+  
+  // 移动光标
+  moveCursor(direction) {
+    if (direction === 'left' && this.cursorPosition > 0) {
+      this.cursorPosition--;
+      if (this.vibrateMode) {
+        vibrator.vibrate({ mode: this.vibrateMode });
+      }
+    } else if (direction === 'right' && this.cursorPosition < this.currentText.length) {
+      this.cursorPosition++;
+      if (this.vibrateMode) {
+        vibrator.vibrate({ mode: this.vibrateMode });
+      }
+    }
+  },
+  
+  // 触摸开始事件
+  onTouchStart(event) {
+    if (event.touches && event.touches.length > 0) {
+      this.touchStartX = event.touches[0].clientX;
+      this.lastTouchX = this.touchStartX;
+      this.touchStartTime = Date.now();
+      this.isTouchMoving = false;
+      // 记录触摸开始时光标的位置
+      this.touchStartPosition = this.cursorPosition;
+    }
+  },
+  
+  // 触摸移动事件
+  onTouchMove(event) {
+    if (event.touches && event.touches.length > 0 && this.currentText.length > 0) {
+      const currentX = event.touches[0].clientX;
+      const deltaX = currentX - this.lastTouchX;
+      const moveThreshold = 20; // 移动阈值
+      
+      const currentY = event.touches[0].clientY;
+      const deltaY = currentY - this.lastTouchY;
+      const moveThresholdY = 20;
+
+      // 判断是否是左右滑动
+      if (Math.abs(deltaX) >= moveThreshold) {
+        this.isTouchMoving = true;
+        
+        if (deltaX < 0) {
+          // 向左滑动，光标向左移动
+          this.moveCursor('left');
+        } else if (deltaX > 0) {
+          // 向右滑动，光标向右移动
+          this.moveCursor('right');
+        }
+        
+        this.lastTouchX = currentX;
+      }
+
+      if (Math.abs(deltaY) >= moveThresholdY) {
+        this.isTouchMoving = true;
+      }
+    }
+  },
+  
+  // 触摸结束事件
+  onTouchEnd() {
+    // 只有在没有发生光标移动时才切换键盘
+    // 判断条件：1.没有移动过 2.光标位置没有变化
+    if (!this.isTouchMoving) {
+      this.toggleInputMethod();
+    }
+    
+    // 重置状态
+    this.isTouchMoving = false;
+    this.touchStartPosition = -1;
+  },
+  
+  
+  // 处理删除操作
+  onDelete() {
+    try {
+      if (this.hideInput) return;
+      
+      // 删除光标前的字符
+      if (this.cursorPosition > 0) {
+        const beforeCursor = this.currentText.substring(0, this.cursorPosition - 1);
+        const afterCursor = this.currentText.substring(this.cursorPosition);
+        this.currentText = beforeCursor + afterCursor;
+        this.cursorPosition--;
+        this.isSaved = false;
+      }
+      
+      // 增加操作计数器
+      this.incrementOperationCounter();
+      
+    } catch (e) {
+      console.error('处理删除操作时出错:', e);
+    }
+  },
+  
+  // 处理输入完成事件（新的输入处理方式）
+  onInputComplete(e) {
+    try {
+      console.log("输入完成:", JSON.stringify(e));
+      // 检查event对象是否存在
+      if (!e) {
+        console.warn("输入完成事件对象为空");
+        return;
+      }
+      
+      // 获取实际的内容（e.detail.content）
+      let content = e.detail.content;
+      
+      // 检查content是否有效，如果无效则不处理
+      if (content !== undefined && content !== null && content !== '') {
+        console.log("处理输入内容:", content);
+        // 在光标位置插入内容
+        const beforeCursor = this.currentText.substring(0, this.cursorPosition);
+        const afterCursor = this.currentText.substring(this.cursorPosition);
+        this.currentText = beforeCursor + content + afterCursor;
+        this.cursorPosition += content.length;
+        
+        // 标记为未保存
+        this.isSaved = false;
+        
+        // 增加操作计数器
+        this.incrementOperationCounter();
+                
+        // 输入字符后自动滚动到底部
+        setTimeout(() => {
+          this.scrollToBottom();
+        }, 50);
+      } else {
+        console.log("输入完成事件内容为空或未定义，忽略处理");
+      }
+      // 如果content无效，则忽略该事件，因为我们已经在onKeyDown中处理了输入
+    } catch (error) {
+      console.error('处理输入完成时出错:', error);
+    }
+  },
+  
+  // 返回操作
+  back() {
+    // 检查笔记是否已保存或者内容为空
+    if (this.isSaved || !this.currentText || this.currentText.trim() === '') {
+      // 清除恢复文件
+      this.clearRecoveryFile();
+      router.back();
+    } else {
+      // 如果未保存且有内容，则显示确认对话框
+      this.showExitConfirm = true;
+      this.hideInput = true;
+    }
+  },
+  
+  // 返回手势
+  onBackPress() {
+    return true; //与光标操作冲突，禁用这个手势
+  },
+  
+  // 显示菜单
+  showMenu() {
+    this.showMenuDialog = true;
+    this.hideInput = true;
+  },
+  
+  // 保存笔记
+  saveNote() {
+    if (this.isSaving) {
+      console.log("正在保存中，请稍后再试");
+      return;
+    }
+    
+    const content = this.currentText;
+    
+    if (!content || !content.trim()) {
+      prompt.showToast({
+        message: '内容不能为空'
+      });
+      return;
+    }
+    
+    this.isSaving = true;
+    try {
+      this.saveToFile(content);
+    } catch (error) {
+      console.error("保存笔记时出错:", error);
+      this.isSaving = false;
+      prompt.showToast({
+        message: '保存失败'
+      });
+    }
+  },
+  
+  // 保存到文件的核心方法
+  saveToFile(content) {
+    try {
+      import('../Common/utils.js').then(utils => {
+        const modifyTime = Date.now();
+        
+        if (this.index >= 0) {
+          // 编辑现有笔记
+          utils.readMetadata((err, metadata) => {
+            if (err) {
+              console.error("读取元数据失败:", err);
+              this.isSaving = false;
+              prompt.showToast({
+                message: '保存失败'
+              });
+              return;
+            }
+            
+            // 获取当前笔记的ID
+            const noteIds = Object.keys(metadata.notes || {}).sort((a, b) => {
+              return metadata.notes[b].createTime - metadata.notes[a].createTime;
+            });
+            
+            if (this.index >= noteIds.length) {
+              console.error("笔记索引超出范围");
+              this.isSaving = false;
+              prompt.showToast({
+                message: '保存失败'
+              });
+              return;
+            }
+            
+            const noteId = noteIds[this.index];
+            
+            // 更新笔记内容
+            utils.saveNoteFile(noteId, content, (err) => {
+              if (err) {
+                console.error("保存笔记文件失败:", err);
+                this.isSaving = false;
+                prompt.showToast({
+                  message: '保存失败'
+                });
+                return;
+              }
+              
+              // 更新元数据中的修改时间
+              metadata.notes[noteId].modifyTime = modifyTime;
+              
+              // 保存更新后的元数据
+              utils.saveMetadata(metadata, (err) => {
+                if (err) {
+                  console.error("保存元数据失败:", err);
+                  this.isSaving = false;
+                  prompt.showToast({
+                    message: '保存失败'
+                  });
+                  return;
+                }
+                
+                this.handleSaveSuccess();
+              });
+            });
+          });
+        } else {
+          // 添加新笔记
+          const createTime = modifyTime;
+          const noteId = createTime.toString(); // 使用创建时间作为笔记ID
+          
+          // 保存笔记文件
+          utils.saveNoteFile(noteId, content, (err) => {
+            if (err) {
+              console.error("保存笔记文件失败:", err);
+              this.isSaving = false;
+              prompt.showToast({
+                message: '保存失败'
+              });
+              return;
+            }
+            
+            // 读取现有元数据或创建新的元数据
+            utils.readMetadata((err, metadata) => {
+              if (err) {
+                // 如果元数据不存在，创建新的
+                metadata = { notes: {} };
+              }
+              
+              // 添加新笔记的元数据
+              metadata.notes[noteId] = {
+                createTime: createTime,
+                modifyTime: modifyTime
+              };
+              
+              // 保存元数据
+              utils.saveMetadata(metadata, (err) => {
+                if (err) {
+                  console.error("保存元数据失败:", err);
+                  this.isSaving = false;
+                  prompt.showToast({
+                    message: '保存失败'
+                  });
+                  return;
+                }
+                
+                this.handleSaveSuccess();
+              });
+            });
+          });
+        }
+      });
+    } catch (error) {
+      console.error("保存到文件时出错:", error);
+      this.isSaving = false;
+      prompt.showToast({
+        message: '保存失败'
+      });
+    }
+  },
+  
+  // 处理保存成功的逻辑
+  handleSaveSuccess() {
+    try {
+      console.log("保存文件成功");
+      // 更新保存状态
+      this.isSaved = true;
+      // 设置为编辑模式，以便显示删除按钮
+      this.isEdit = true;
+      // 重置保存状态标志
+      this.isSaving = false;
+      // 显示保存成功提示
+      prompt.showToast({
+        message: '保存成功'
+      });
+      // 保存成功后关闭菜单
+      this.showMenuDialog = false;
+      // 恢复输入法显示状态
+      this.hideInput = false;
+      
+      // 保存成功后清除恢复文件
+      this.clearRecoveryFile();
+      
+      //计算safe-area大小
+      this.$nextTick(function () { 
+        this.scrollToBottom()
+      });
+      
+      // 通知index页面笔记已更改
+      notifyNotesChange();
+    } catch (innerError) {
+      console.error("保存成功回调处理异常:", innerError);
+    }
+  },
+  
+  // 显示二维码
+  showQRCode() {
+    this.showMenuDialog = false;
+    this.noteContentForQR = this.currentText;
+    this.showQRDialog = true;
+    this.hideInput = true;
+  },
+  
+  // 关闭二维码对话框
+  closeQRDialog() {
+    this.showQRDialog = false;
+    this.hideInput = false;
+    
+    this.$nextTick(() => {
+      this.scrollToBottom()
+    })
+  },
+  
+  // 删除笔记
+  deleteNote() {
+    this.showMenuDialog = false;
+    this.showConfirmDialog = true;
+    this.hideInput = true;
+  },
+  
+  // 取消菜单
+  cancelMenu() {
+    this.showMenuDialog = false;
+    this.hideInput = false;
+    
+    this.$nextTick(() => {
+      this.scrollToBottom()
+    })
+  },
+  
+  // 取消删除
+  cancelDelete() {
+    this.showConfirmDialog = false;
+    this.hideInput = false;
+    
+    this.$nextTick(() => {
+      this.scrollToBottom()
+    })
+  },
+  
+  // 确认删除
+  confirmDelete() {
+    this.showConfirmDialog = false;
+    this.deleteNoteFromFile();
+  },
+  
+  // 从文件中删除笔记
+  deleteNoteFromFile() {
+    try {
+      import('../Common/utils.js').then(utils => {
+        utils.readMetadata((err, metadata) => {
+          if (err) {
+            console.error("读取元数据失败:", err);
+            this.handleDeleteComplete();
+            return;
+          }
+          
+          // 获取笔记ID列表并排序
+          const noteIds = Object.keys(metadata.notes || {}).sort((a, b) => {
+            return metadata.notes[b].createTime - metadata.notes[a].createTime;
+          });
+          
+          // 使用原始索引删除笔记
+          if (this.index >= 0 && this.index < noteIds.length) {
+            const noteId = noteIds[this.index];
+            
+            // 删除笔记文件
+            utils.deleteNoteFile(noteId, (err) => {
+              if (err) {
+                console.error("删除笔记文件失败:", err);
+              }
+              
+              // 从元数据中移除笔记信息
+              delete metadata.notes[noteId];
+              
+              // 保存更新后的元数据
+              utils.saveMetadata(metadata, (err) => {
+                if (err) {
+                  console.error("更新元数据失败:", err);
+                }
+                this.handleDeleteComplete();
+              });
+            });
+          } else {
+            console.warn("索引超出范围或笔记不存在");
+            this.handleDeleteComplete();
+          }
+        });
+      });
+    } catch (error) {
+      console.error("删除笔记时发生异常:", error);
+      this.handleDeleteComplete();
+    }
+  },
+  
+  // 处理删除完成
+  handleDeleteComplete() {
+    // 关闭确认对话框
+    this.showConfirmDialog = false;
+    // 显示删除成功提示
+    prompt.showToast({
+      message: '删除成功'
+    });
+    // 返回主页面
+    setTimeout(() => {
+      router.back();
+    }, 500);
+    
+    // 通知index页面笔记已更改
+    notifyNotesChange();
+  },
+  
+  // 取消退出
+  cancelExit() {
+    this.showExitConfirm = false;
+    this.hideInput = false;
+    
+    this.$nextTick(() => {
+      this.scrollToBottom()
+    })
+  },
+  
+  // 确认退出
+  confirmExit() {
+    this.showExitConfirm = false;
+    // 清除恢复文件
+    this.clearRecoveryFile();
+    router.back();
+  },
+  
+  // 安全滚动到底部方法
+  scrollToBottom() {
+    // 如果光标不在末尾，直接返回
+    if (this.cursorPosition < this.currentText.length) {
+      return;
+    }
+    
+    const scrollElement = this.$element("textScroll")
+    scrollElement.scrollTo({
+            top: 2147483647,//最大安全整数
+            behavior: 'smooth'
+          });
+          console.log('滚动执行成功');
+  },
+  
+  scrollToTop() {
+    const scrollElement = this.$element("textScroll")
+    scrollElement.scrollTo({
+            top: 0,
+            behavior: 'smooth'
+          });
+          console.log('滚动执行成功');
+  },
+  
+  // 检查并保存恢复文件
+  checkAndSaveRecovery() {
+    // 只有当文本内容发生变化时才保存
+    if (this.currentText !== this.lastSavedRecoveryText) {
+      this.saveRecoveryFile(this.currentText);
+      this.lastSavedRecoveryText = this.currentText;
+    }
+  },
+  
+  // 保存恢复文件
+  saveRecoveryFile(content) {
+    try {
+      import('../Common/utils.js').then(utils => {
+        // 在恢复文件中添加时间戳
+        const timestamp = Date.now();
+        const noteId = `recovery_${timestamp}`;
+        
+        // 保存恢复文件
+        utils.saveNoteFile(noteId, content, (err) => {
+          if (err) {
+            console.error("保存恢复文件失败:", err);
+            return;
+          }
+          
+          // 更新元数据，标记为恢复文件
+          utils.readMetadata((err, metadata) => {
+            if (err) {
+              metadata = { notes: {} };
+            }
+            
+            metadata.notes[noteId] = {
+              createTime: timestamp,
+              modifyTime: timestamp,
+              recovery: true
+            };
+            
+            utils.saveMetadata(metadata, (err) => {
+              if (err) {
+                console.error("保存恢复文件元数据失败:", err);
+              } else {
+                console.log("恢复文件保存成功");
+              }
+            });
+          });
+        });
+      });
+    } catch (error) {
+      console.error('保存恢复文件时发生异常:', error);
+    }
+  },
+  
+  // 清除恢复文件
+  clearRecoveryFile() {
+    try {
+      import('../Common/utils.js').then(utils => {
+        utils.readMetadata((err, metadata) => {
+          if (err) {
+            console.log("读取元数据失败，可能没有恢复文件");
+            return;
+          }
+          
+          // 查找所有标记为恢复的文件
+          const recoveryNoteIds = Object.keys(metadata.notes || {}).filter(noteId => {
+            return metadata.notes[noteId].recovery === true;
+          });
+          
+          // 删除所有恢复文件
+          let deleteCount = 0;
+          const totalRecoveryFiles = recoveryNoteIds.length;
+          
+          if (totalRecoveryFiles === 0) {
+            console.log("没有找到恢复文件");
+            return;
+          }
+          
+          recoveryNoteIds.forEach(noteId => {
+            utils.deleteNoteFile(noteId, (err) => {
+              deleteCount++;
+              if (err) {
+                console.error(`删除恢复文件 ${noteId} 失败:`, err);
+              } else {
+                console.log(`恢复文件 ${noteId} 删除成功`);
+              }
+              
+              // 删除完所有恢复文件后，更新元数据
+              if (deleteCount === totalRecoveryFiles) {
+                recoveryNoteIds.forEach(id => {
+                  delete metadata.notes[id];
+                });
+                
+                utils.saveMetadata(metadata, (err) => {
+                  if (err) {
+                    console.error("更新元数据失败:", err);
+                  } else {
+                    console.log("恢复文件元数据清除成功");
+                  }
+                });
+              }
+            });
+          });
+        });
+      });
+    } catch (error) {
+      console.error('清除恢复文件时发生异常:', error);
+    }
+  },
+  
+  loadVibrationSetting() {
+    getCachedSettings((err, settings) => {
+      if (!err && settings) {
+        this.vibrateMode = settings.vibrationEnabled !== false ? 'short' : '';
+      } else {
+        this.vibrateMode = 'short';
+      }
+      this.vibrationSettingLoaded = true;
+      this.checkAllSettingsLoaded();
+    });
+  },
+  
+  loadAutoScrollSetting() {
+    getCachedSettings((err, settings) => {
+      if (!err && settings) {
+        this.autoScrollType = settings.autoScrollType || 'oneBlank';
+      } else {
+        this.autoScrollType = 'oneBlank';
+      }
+      this.autoScrollSettingLoaded = true;
+      this.checkAllSettingsLoaded();
+    });
+  },
+  
+  // 加载边框宽度设置
+  loadBorderWidthSetting() {
+    getCachedSettings((err, settings) => {
+      if (!err && settings) {
+        this.borderWidth = settings.borderWidth || '10px';
+      } else {
+        this.borderWidth = '10px';
+      }
+      this.borderWidthSettingLoaded = true;
+      this.checkAllSettingsLoaded();
+    });
+  },
+  
+  checkVibrationSetting(callback) {
+    // 直接使用已加载的设置值，避免重复读取
+    if (this.vibrateMode && callback) {
+      callback();
+    } else if (!this.vibrateMode) {
+      // 即使没有启用振动也执行回调
+      if (callback) callback();
+    }
+  },
+  
+  // 确保所有设置都已加载
+  ensureSettingsLoaded(callback) {
+    if (this.allSettingsLoaded) {
+      callback();
+    } else {
+      this.settingsLoadedCallback = callback;
+    }
+  },
+  
+  // 检查所有设置是否已加载
+  checkAllSettingsLoaded() {
+    if (this.vibrationSettingLoaded && 
+        this.autoScrollSettingLoaded && 
+        this.borderWidthSettingLoaded) {
+      this.allSettingsLoaded = true;
+      if (this.settingsLoadedCallback) {
+        this.settingsLoadedCallback();
+        this.settingsLoadedCallback = null;
+      }
+    }
+  },
+}
+</script>

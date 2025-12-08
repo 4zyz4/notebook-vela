@@ -1,0 +1,218 @@
+<template>
+  <div class="page">
+    <!-- 添加时间显示 -->
+    <div class="time-display">
+      <text class="time-text">{{currentTime}}</text>
+    </div>
+    <div class="header">
+      <text class="title">关于</text>
+    </div>
+    
+    <list class="content" bounces="true">
+
+    <list-item type="app-info" class="app-info" style="height: 300px;">
+        <image src="/Common/logo.png" class="logo"></image>
+        <text class="app-name">笔记本</text>
+        <text class="info">版本 1.4.1</text>
+        <text class="info">作者:4zyz4</text>
+    </list-item> 
+
+    <list-item type="section" class="section" style="height: 230px;">
+        <text class="section-title">手势操作说明</text>
+        <div class="gesture-item">
+          <text class="gesture-name">左右滑动</text>
+          <text class="gesture-desc">移动光标</text>
+        </div>
+        <div class="gesture-item">
+          <text class="gesture-name">单击文本区域</text>
+          <text class="gesture-desc">隐藏/显示键盘</text>
+        </div>
+    </list-item>
+
+    <list-item type="section" class="section" style="height: 250px;">
+      <!-- 赞助栏 -->
+        <text class="section-title">欢迎赞助</text>
+        <div class="gesture-item">
+          <image src="/Common/reward.png" class="reward-image"></image>
+        </div>
+    </list-item>
+
+    </list>
+  </div>
+</template>
+
+<script>  
+  export default {
+    private: {
+      timeUpdateTimer: null,
+      currentTime: ''
+    },
+    
+    onInit() {
+      // 初始化当前时间
+      this.updateCurrentTime()
+      // 启动时间更新定时器
+      this.updateTimeDisplay()
+    },
+    
+    onShow() {
+      // 更新当前时间
+      this.updateCurrentTime()
+      // 清除可能存在的旧时间更新定时器并启动新的定时器
+      if (this.timeUpdateTimer) {
+        clearInterval(this.timeUpdateTimer)
+        this.timeUpdateTimer = null
+      }
+      // 启动时间更新定时器
+      this.updateTimeDisplay()
+    },
+    
+    onHide() {
+      // 页面隐藏时清除定时器
+      if (this.timeUpdateTimer) {
+        clearInterval(this.timeUpdateTimer)
+        this.timeUpdateTimer = null
+      }
+    },
+    
+    onDestroy() {
+      // 页面销毁时清除定时器
+      if (this.timeUpdateTimer) {
+        clearInterval(this.timeUpdateTimer)
+        this.timeUpdateTimer = null
+      }
+    },
+    
+    // 格式化当前时间显示（HH:MM格式）
+    updateCurrentTime() {
+      const now = new Date();
+      const hour = now.getHours().toString().padStart(2, '0');
+      const minute = now.getMinutes().toString().padStart(2, '0');
+      this.currentTime = `${hour}:${minute}`;
+    },
+    
+    // 更新时间显示
+    updateTimeDisplay() {
+      this.timeUpdateTimer = setInterval(() => {
+        // 更新当前时间
+        this.updateCurrentTime();
+      }, 60000); // 每分钟更新一次时间
+    },
+  }
+</script>
+
+<style>
+  .page {
+    flex-direction: column;
+    background-color: #000000;
+    width: 100%;
+    height: 100%;
+  }
+  
+  .time-display {
+    height: 24px;
+    justify-content: center;
+    align-items: center;
+    border-radius: 12px;
+    margin: 5px;
+    padding: 5px;
+  }
+
+  .time-text {
+    font-size: 20px;
+    font-weight: bold;
+    color: #999999;
+  }
+  
+  .header {
+    height: 60px;
+    padding-left: 20px;
+    padding-right: 20px;
+    border-bottom-width: 2px;
+    border-bottom-color: #333333;
+    align-items: center;
+    justify-content: space-between;
+  }
+  
+  .title {
+    font-size: 30px;
+    color: #ffffff;
+  }
+  
+  .content {
+    flex-direction: column;
+    align-items: center;
+    padding:10px;
+    flex:1;
+  }
+  
+  .logo {
+    width: 100px;
+    height: 100px;
+    margin-top: 20px;
+    margin-bottom: 20px;
+  }
+  
+  .app-info {
+    width: 100%;
+    background-color: #1f1f1f;
+    border-radius: 12px;
+    padding: 10px;
+    margin-bottom: 50px;
+    border: 3px solid rgba(255,255,255,0.06);
+    flex-direction: column;
+    align-items: center;
+  }
+  
+  .app-name {
+    font-size: 36px;
+    color: #ffffff;
+    font-weight: bold;
+    margin-bottom: 10px;
+  }
+  
+  .info {
+    font-size: 20px;
+    color: #999999;
+  }
+  
+  .section {
+    width: 100%;
+    flex-direction: column;
+    margin-bottom: 30px;
+  }
+  
+  .section-title {
+    font-size: 25px;
+    color: #ffffff;
+    margin-bottom: 10px;
+    text-align: center;
+  }
+  
+  .gesture-item {
+    background-color: #1f1f1f;
+    border-radius: 12px;
+    padding: 10px;
+    margin-bottom: 10px;
+    border: 3px solid rgba(255,255,255,0.06);
+    flex-direction: column;
+    align-items: center;
+  }
+  
+  .gesture-name {
+    font-size: 22px;
+    color: #ffffff;
+    font-weight: bold;
+    margin-bottom: 10px;
+  }
+  
+  .gesture-desc {
+    font-size: 18px;
+    color: #999999;
+  }
+  
+  .reward-image {
+    width: 160px;
+    height: 160px;
+  }
+</style>
