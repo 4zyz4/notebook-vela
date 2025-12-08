@@ -1,0 +1,741 @@
+<template>
+  <div class="page">
+    <!-- 添加时间显示 -->
+    <div class="time-display" onclick="scrollToTop">
+      <text class="time-text">{{currentTime}}</text>
+    </div>
+    <div class="header">
+      <text class="title">笔记</text>
+      <div class="header-buttons">
+        <div class="settings-btn" onclick="goToSettings">
+          <image src="/Common/settings.png" class="settings-icon"></image>
+        </div>
+        <div class="add-btn" onclick="addNote">
+          <text class="add-btn-text">+</text>
+        </div>
+      </div>
+    </div>
+    
+    <list class="note-list" id="noteList" bounces="true">
+      <list-item type="note" class="note-item" for="{{(index, note) in notes}}" onclick="editNote(index)">
+        <text class="note-text">{{getPreview(note)}}</text>
+        <text class="note-time">{{formatNoteTime(note)}}</text>
+      </list-item>
+      <list-item type="safe-area" class="safe-area">
+      </list-item>
+    </list>
+
+    
+    <div if="{{notes.length === 0}}" class="empty-tip">
+      <text class="empty-tip-text">暂无笔记</text>
+    </div>
+    
+    <!-- 加载提示对话框 -->
+    <div class="confirm-dialog" if="{{showLoading}}">
+      <div class="confirm-content">
+        <text class="confirm-title" style="margin-bottom:0px">加载中</text>
+      </div>
+    </div>
+    
+    <!-- 恢复对话框 -->
+    <div class="confirm-dialog" if="{{showRecoveryDialog}}">
+      <div class="confirm-content">
+        <text class="confirm-title">恢复</text>
+        <text class="confirm-message2">手环发生了崩溃</text>
+        <text class="confirm-message2" if="{{recoveryTime}}">崩溃时间:</text>
+        <text class="confirm-message2" if="{{recoveryTime}}">{{recoveryTime}}</text>
+        <text class="confirm-message2">是否恢复笔记？</text>
+        <div class="confirm-buttons">
+          <input type="button" class="confirm-btn2" value="恢复" onclick="recoverNote"/>
+          <input type="button" class="confirm-btn" value="取消" onclick="cancelRecovery"/>
+        </div>
+      </div>
+    </div>
+  </div>
+</template>
+
+<script>
+import router from '@system.router'
+import file from '@system.file'
+import { getCachedSettings, addSettingsListener, removeSettingsListener, addNotesListener, removeNotesListener } from '../Common/utils.js'
+
+export default {
+  private: {
+    notes: [],
+    loading: false,
+    showLoading: false,
+    navigationTimer: null,
+    timeDisplayType: 'createTime', // 从设置中读取
+    timeUpdateTimer: null,
+    currentTime: '', // 添加当前时间变量
+    lastSettingsLoad: 0, // 上次加载设置的时间
+    settingsCache: null, // 设置缓存
+    notesCache: null, // 笔记缓存
+    lastNotesLoad: 0, // 上次加载笔记的时间
+    notesCacheDuration: 5000, // 笔记缓存5秒
+    showRecoveryDialog: false, // 是否显示恢复对话框
+    recoveryContent: '', // 恢复内容
+    recoveryTime: '' // 恢复文件时间
+  },
+  
+  onInit() {
+    this.loadSettings()
+    this.loadNotes()
+    // 初始化当前时间
+    this.updateCurrentTime()
+    // 启动时间更新定时器
+    this.updateTimeDisplay()
+    // 添加设置变化监听器
+    addSettingsListener(this.onSettingsChange.bind(this));
+    // 添加笔记变化监听器
+    addNotesListener(this.onNotesChange.bind(this));
+  },
+  
+  onShow() {
+    // 每次页面显示时都重新加载设置和笔记列表
+    // 清除设置缓存以确保获取最新设置
+    this.settingsCache = null;
+    this.lastSettingsLoad = 0;
+    // 清除笔记缓存以确保获取最新笔记
+    this.notesCache = null;
+    this.lastNotesLoad = 0;
+    
+    this.loadSettings()
+    this.loadNotes()
+    // 检查是否有恢复文件
+    this.checkRecoveryFile();
+    // 确保隐藏加载对话框（特别是从edit页面返回时）
+    this.showLoading = false;
+    
+    // 清除可能存在的跳转定时器
+    if (this.navigationTimer) {
+      clearTimeout(this.navigationTimer);
+      this.navigationTimer = null;
+    }
+    
+    // 更新当前时间
+    this.updateCurrentTime()
+    // 清除可能存在的旧时间更新定时器并启动新的定时器
+    if (this.timeUpdateTimer) {
+      clearInterval(this.timeUpdateTimer)
+      this.timeUpdateTimer = null
+    }
+    // 启动时间更新定时器
+    this.updateTimeDisplay()
+  },
+  
+  // 检查恢复文件
+  checkRecoveryFile() {
+    try {
+      import('../Common/utils.js').then(utils => {
+        utils.readMetadata((err, metadata) => {
+          if (err) {
+            console.log("读取元数据失败:", err);
+            return;
+          }
+          
+          // 查找最新的恢复文件
+          const recoveryEntries = Object.entries(metadata.notes || {})
+            .filter(([noteId, noteData]) => noteData.recovery)
+            .map(([noteId, noteData]) => ({
+              id: noteId,
+              createTime: noteData.createTime
+            }));
+          
+          if (recoveryEntries.length === 0) {
+            console.log("没有找到恢复文件");
+            return;
+          }
+          
+          // 按创建时间排序，获取最新的恢复文件
+          recoveryEntries.sort((a, b) => b.createTime - a.createTime);
+          const latestRecovery = recoveryEntries[0];
+          
+          // 读取恢复文件内容
+          utils.readNoteFile(latestRecovery.id, (err, content) => {
+            if (err) {
+              console.error("读取恢复文件失败:", err);
+              return;
+            }
+            
+            this.recoveryContent = content;
+            const recoveryTimestamp = latestRecovery.createTime;
+            // 格式化时间显示
+            const date = new Date(recoveryTimestamp);
+            const year = (date.getFullYear() % 100).toString().padStart(2, '0');
+            const month = (date.getMonth() + 1).toString().padStart(2, '0');
+            const day = date.getDate().toString().padStart(2, '0');
+            const hour = date.getHours().toString().padStart(2, '0');
+            const minute = date.getMinutes().toString().padStart(2, '0');
+            this.recoveryTime = `${year}.${month}.${day} ${hour}:${minute}`;
+            
+            // 显示恢复对话框
+            this.showRecoveryDialog = true;
+          });
+        });
+      });
+    } catch (error) {
+      console.error("检查恢复文件时发生异常:", error);
+    }
+  },
+  
+  // 恢复笔记
+  recoverNote() {
+    // 隐藏恢复对话框
+    this.showRecoveryDialog = false;
+    
+    // 清除恢复文件
+    this.clearRecoveryFile();
+    
+    // 跳转到编辑页面，传递恢复的内容
+    this.showLoading = true;
+    this.navigationTimer = setTimeout(() => {
+      router.push({
+        uri: '/edit',
+        params: {
+          index: -1,
+          content: this.recoveryContent
+        }
+      });
+    }, 100);
+  },
+  
+  // 取消恢复
+  cancelRecovery() {
+    // 隐藏恢复对话框
+    this.showRecoveryDialog = false;
+    
+    // 清除恢复文件
+    this.clearRecoveryFile();
+    
+    // 清空恢复内容
+    this.recoveryContent = '';
+  },
+  
+  // 清除恢复文件
+  clearRecoveryFile() {
+    try {
+      import('../Common/utils.js').then(utils => {
+        utils.readMetadata((err, metadata) => {
+          if (err) {
+            console.log("读取元数据失败，可能没有恢复文件");
+            return;
+          }
+          
+          // 查找所有标记为恢复的文件
+          const recoveryNoteIds = Object.keys(metadata.notes || {}).filter(noteId => {
+            return metadata.notes[noteId].recovery === true;
+          });
+          
+          // 删除所有恢复文件
+          let deleteCount = 0;
+          const totalRecoveryFiles = recoveryNoteIds.length;
+          
+          if (totalRecoveryFiles === 0) {
+            console.log("没有找到恢复文件");
+            return;
+          }
+          
+          recoveryNoteIds.forEach(noteId => {
+            utils.deleteNoteFile(noteId, (err) => {
+              deleteCount++;
+              if (err) {
+                console.error(`删除恢复文件 ${noteId} 失败:`, err);
+              } else {
+                console.log(`恢复文件 ${noteId} 删除成功`);
+              }
+              
+              // 删除完所有恢复文件后，更新元数据
+              if (deleteCount === totalRecoveryFiles) {
+                recoveryNoteIds.forEach(id => {
+                  delete metadata.notes[id];
+                });
+                
+                utils.saveMetadata(metadata, (err) => {
+                  if (err) {
+                    console.error("更新元数据失败:", err);
+                  } else {
+                    console.log("恢复文件元数据清除成功");
+                  }
+                });
+              }
+            });
+          });
+        });
+      });
+    } catch (error) {
+      console.error('清除恢复文件时发生异常:', error);
+    }
+  },
+  
+  onHide() {
+    // 页面隐藏时清除定时器
+    if (this.timeUpdateTimer) {
+      clearInterval(this.timeUpdateTimer)
+      this.timeUpdateTimer = null
+    }
+  },
+  
+  onDestroy() {
+    // 页面销毁时清除定时器
+    if (this.timeUpdateTimer) {
+      clearInterval(this.timeUpdateTimer)
+      this.timeUpdateTimer = null
+    }
+    // 移除设置变化监听器
+    removeSettingsListener(this.onSettingsChange.bind(this));
+    // 移除笔记变化监听器
+    removeNotesListener(this.onNotesChange.bind(this));
+  },
+  
+  // 设置变化回调
+  onSettingsChange(settings) {
+    console.log('设置已更改:', settings);
+    if (settings && settings.timeDisplayType !== this.timeDisplayType) {
+      this.timeDisplayType = settings.timeDisplayType || 'createTime';
+      // 重新排序笔记
+      this.sortNotes();
+    }
+  },
+  
+  // 笔记变化回调
+  onNotesChange() {
+    console.log('笔记已更改，重新加载笔记列表');
+    // 清除笔记缓存并重新加载
+    this.notesCache = null;
+    this.lastNotesLoad = 0;
+    this.loadNotes();
+  },
+  
+  loadSettings() {
+    // 检查是否需要重新加载设置（限制频率）
+    const now = Date.now();
+    if (this.settingsCache && (now - this.lastSettingsLoad) < 5000) {
+      // 使用缓存的设置
+      this.applySettings(this.settingsCache);
+      return;
+    }
+    
+    getCachedSettings((err, settings) => {
+      this.settingsCache = settings;
+      this.lastSettingsLoad = now;
+      this.applySettings(settings);
+    });
+  },
+  
+  // 应用设置
+  applySettings(settings) {
+    const oldTimeDisplayType = this.timeDisplayType;
+    if (settings) {
+      this.timeDisplayType = settings.timeDisplayType || 'createTime';
+    } else {
+      this.timeDisplayType = 'createTime';
+    }
+    
+    // 如果排序方式改变，重新排序
+    if (oldTimeDisplayType !== this.timeDisplayType) {
+      this.sortNotes();
+    }
+  },
+  
+  loadNotes() {
+    const now = Date.now();
+    // 检查笔记缓存
+    if (this.notesCache && (now - this.lastNotesLoad) < this.notesCacheDuration) {
+      this.notes = this.notesCache;
+      this.loading = false;
+      return;
+    }
+    
+    // 显示加载提示
+    this.loading = true;
+    
+    import('../Common/utils.js').then(utils => {
+      utils.readMetadata((err, metadata) => {
+        if (err) {
+          console.log("读取元数据失败:", err);
+          this.notes = [];
+          this.notesCache = [];
+          this.lastNotesLoad = now;
+          this.loading = false;
+          return;
+        }
+        
+        // 获取所有非恢复笔记
+        const noteEntries = Object.entries(metadata.notes || {})
+          .filter(([noteId, noteData]) => !noteData.recovery)
+          .map(([noteId, noteData]) => ({
+            id: noteId,
+            createTime: noteData.createTime,
+            modifyTime: noteData.modifyTime
+          }));
+        
+        // 按时间排序
+        noteEntries.sort((a, b) => b.createTime - a.createTime);
+        
+        // 逐个读取笔记内容
+        let loadedNotes = [];
+        let loadedCount = 0;
+        const totalCount = noteEntries.length;
+        
+        if (totalCount === 0) {
+          this.notes = [];
+          this.notesCache = [];
+          this.lastNotesLoad = now;
+          this.loading = false;
+          return;
+        }
+        
+        noteEntries.forEach((noteEntry, index) => {
+          utils.readNoteFile(noteEntry.id, (err, content) => {
+            loadedCount++;
+            
+            if (!err && content !== undefined) {
+              loadedNotes[index] = {
+                content: `${content}|${noteEntry.createTime}|${noteEntry.modifyTime}`,
+                originalIndex: index,
+                id: noteEntry.id
+              };
+            } else {
+              console.error(`读取笔记 ${noteEntry.id} 失败:`, err);
+              loadedNotes[index] = {
+                content: `|${noteEntry.createTime}|${noteEntry.modifyTime}`,
+                originalIndex: index,
+                id: noteEntry.id
+              };
+            }
+            
+            // 检查是否所有笔记都已加载完成
+            if (loadedCount === totalCount) {
+              // 过滤掉加载失败的笔记
+              this.notes = loadedNotes.filter(note => note !== undefined);
+              this.notesCache = this.notes;
+              this.lastNotesLoad = now;
+              // 按照当前时间显示类型排序
+              this.sortNotes();
+              this.loading = false;
+            }
+          });
+        });
+      });
+    }).catch(err => {
+      console.error("导入工具模块失败:", err);
+      this.notes = [];
+      this.notesCache = [];
+      this.lastNotesLoad = now;
+      this.loading = false;
+    });
+  },
+
+  getPreview(text) {
+    // 返回文本的前32个字符
+    if (!text) return '';
+    // 提取笔记主体内容（去除时间戳部分）
+    const parts = text.content.split('|');
+    const content = parts[0] || '';
+    if (content.length <= 32) return content;
+    return content.substring(0, 32);
+  },
+
+  // 格式化笔记时间显示
+  formatNoteTime(note) {
+    // 时间类型
+    const timeType = this.timeDisplayType === 'createTime' ? '创建' : '修改';
+
+    const parts = note.content.split('|');
+    if (parts.length < 3) return '没有记录'+ timeType + '时间'; // 如果没有时间信息
+    
+    const createTime = parseInt(parts[1]);
+    const modifyTime = parseInt(parts[2]);
+    
+    // 根据当前显示类型选择时间
+    const time = this.timeDisplayType === 'createTime' ? createTime : modifyTime;
+    
+    // 格式化时间显示为 YYMMDD HHMM
+    const date = new Date(time);
+    const year = (date.getFullYear() % 100).toString().padStart(2, '0');
+    const month = (date.getMonth() + 1).toString().padStart(2, '0');
+    const day = date.getDate().toString().padStart(2, '0');
+    const hour = date.getHours().toString().padStart(2, '0');
+    const minute = date.getMinutes().toString().padStart(2, '0');
+    
+    return `${year}.${month}.${day} ${hour}:${minute} ${timeType}`;
+  },
+  
+  // 格式化当前时间显示（HH:MM格式）
+  updateCurrentTime() {
+    const now = new Date();
+    const hour = now.getHours().toString().padStart(2, '0');
+    const minute = now.getMinutes().toString().padStart(2, '0');
+    this.currentTime = `${hour}:${minute}`;
+  },
+  
+  // 更新时间显示
+  updateTimeDisplay() {
+    this.timeUpdateTimer = setInterval(() => {
+      // 更新当前时间
+      this.updateCurrentTime();
+    }, 10000); 
+  },
+  
+  // 切换时间显示类型
+  toggleTimeDisplay() {
+    this.timeDisplayType = this.timeDisplayType === 'createTime' ? 'modifyTime' : 'createTime';
+    this.sortNotes();
+  },
+  
+  // 按时间排序笔记
+  sortNotes() {
+    this.notes.sort((a, b) => {
+      const partsA = a.content.split('|');
+      const partsB = b.content.split('|');
+      
+      if (partsA.length < 3 || partsB.length < 3) return 0;
+      
+      const timeA = this.timeDisplayType === 'createTime' 
+        ? parseInt(partsA[1]) 
+        : parseInt(partsA[2]);
+        
+      const timeB = this.timeDisplayType === 'createTime' 
+        ? parseInt(partsB[1]) 
+        : parseInt(partsB[2]);
+      
+      // 从新到旧排序
+      return timeB - timeA;
+    });
+  },
+  
+  addNote() {
+    // 显示加载提示
+    this.showLoading = true;
+    
+    // 使用setTimeout确保UI更新后才执行跳转，并保存定时器ID以便取消
+    this.navigationTimer = setTimeout(() => {
+      router.push({
+        uri: '/edit',
+        params: {
+          index: -1,
+          content: ''
+        }
+      })
+    }, 100);
+  },
+  
+  editNote(index) {
+    // 显示加载提示
+    this.showLoading = true;
+    
+    // 使用setTimeout确保UI更新后才执行跳转，并保存定时器ID以便取消
+    this.navigationTimer = setTimeout(() => {
+      router.push({
+        uri: '/edit',
+        params: {
+          index: this.notes[index].originalIndex, // 传递原始索引
+          content: this.notes[index].content
+        }
+      })
+    }, 100);
+  },
+  
+  
+  // 跳转到设置页面
+  goToSettings() {
+    router.push({
+      uri: '/settings'
+    });
+  },
+  scrollToTop() {
+    const scrollElement = this.$element("noteList")
+    scrollElement.scrollTo({
+            top: 0,
+            behavior: 'smooth'
+          });
+          console.log('滚动执行成功');
+  }
+}
+</script>
+
+<style>
+.page {
+  flex-direction: column;
+  background-color: #000000;
+  width: 100%;
+  height: 100%;
+  overflow-x: hidden;
+}
+
+.time-display {
+  height: 24px;
+  justify-content: center;
+  align-items: center;
+  border-radius: 12px; /* 添加圆角 */
+  margin: 5px;
+  padding: 5px;
+}
+
+.time-text {
+  font-size: 20px;
+  font-weight: bold;
+  color: #999999;
+}
+
+.header {
+  height: 60px;
+  padding-left: 20px;
+  padding-right: 20px;
+  border-bottom-width: 2px;
+  border-bottom-color: #333333;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.title {
+  font-size: 30px;
+  color: #ffffff;
+}
+
+.header-buttons {
+  flex-direction: row;
+  align-items: center;
+}
+
+.settings-btn,.add-btn {
+  width: 50px;
+  height: 50px;
+  background-color: rgb(38,38,38);
+  border-radius: 25px;
+  margin-right: 3px;
+  justify-content: center;
+  align-items: center;
+  border: 3px solid rgba(255,255,255,0.06); /* 添加边框 */
+}
+
+.settings-icon {
+  width: 16px;
+  height: 16px;
+}
+
+.note-list {
+  align-items: center;
+  flex: 1;
+  width: 212px;
+  padding-top: 7px;
+}
+
+.note-item {
+  height: 90px;
+  width: 202px;
+  background-color: #262626;
+  flex-direction: column;
+  justify-content: center;
+  border-radius: 20px; /* 添加圆角 */
+  margin-left: 5px; /* 添加外边距 */
+  margin-bottom: 7px;
+  padding:5px;
+}
+
+.note-text {
+  flex: 1;
+  font-size: 24px;
+  color: #ffffff;
+  lines: 1;
+  text-overflow: ellipsis;
+  padding:2px;
+}
+
+.note-time {
+  font-size: 18px;
+  color: #999999;
+  margin-top: 5px;
+}
+
+.empty-tip {
+  position: absolute;
+  top: 238px;
+  left: 50px;
+}
+.empty-tip-text {
+  font-size: 28px;
+  color: #666666;
+}
+
+.add-btn-text {
+  font-size: 30px;
+  font-weight: bold;
+  color: #ffffff;
+}
+
+
+/* 添加与edit.ux中删除确认窗口相同的样式 */
+.confirm-dialog {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background-color: rgba(0, 0, 0, 0.7);
+  justify-content: center;
+  align-items: center;
+}
+
+.confirm-content {
+  width: 90%;
+  background-color: #1f1f1f;
+  border: 3px solid rgba(255,255,255,0.06); /* 修改边框样式 */
+  border-radius: 12px; /* 修改圆角 */
+  padding: 20px;
+  flex-direction: column;
+}
+
+.confirm-title {
+  font-size: 28px;
+  color: #ffffff;
+  text-align: center;
+  margin-bottom: 10px;
+}
+
+.confirm-message {
+  font-size: 24px;
+  color: #ffffff;
+  text-align: center;
+  margin-bottom: 10px;
+}
+
+.confirm-message2 {
+  font-size: 18px;
+  color: #ffffff;
+  text-align: center;
+}
+
+.confirm-buttons {
+  margin-top: 10px;
+  flex-direction: column;
+  justify-content: space-between;
+}
+
+.confirm-btn {
+  width: 100%;
+  height: 60px;
+  border-radius: 12px; /* 修改圆角 */
+  background-color: #262626; /* 修改背景色 */
+  border: 3px solid rgba(255,255,255,0.06); /* 添加边框 */
+  font-size: 24px;
+  color: #ffffff;
+  text-align: center;
+  margin-bottom: 10px;
+}
+
+.confirm-btn2 {
+  width: 100%;
+  height: 80px;
+  border-radius: 12px; /* 修改圆角 */
+  border: 3px solid rgba(255,255,255,0.06); /* 添加边框 */
+  font-size: 24px;
+  color: #ffffff;
+  text-align: center;
+}
+.safe-area {
+  height: 50px;
+  background-color: #000000;
+}
+</style>

@@ -1,0 +1,404 @@
+<template>
+  <div class="page" style="flex-direction: column;" show="{{!hide}}">
+    <div style="background-color:black" >
+      <!-- 胶囊屏 -->
+      <div style="width: 100%;height: 305px">
+        <div static style="position:absolute;left:0px;top:34px;width:100%;height:276px;">
+          <progress percent="100" type="arc" style="start-angle:204deg;total-angle:-48deg;width:188px;height:188px;top:83px;left:2px;position:absolute;color:rgb(33,34,33);stroke-width:9px;layer-color:rgb(33,34,33);margin-left: 10px;"></progress>
+          <progress percent="{{30+percent}}" type="arc" style="start-angle:204deg;total-angle:-48deg;width:188px;height:188px;top:82px;left:2px;position:absolute;color:#ffffff;stroke-width:7px;layer-color:rgba(0,0,0,0);margin-left: 10px;"></progress>
+          <progress percent="{{1+percent}}" type="arc" style="start-angle:204deg;total-angle:-48deg;width:188px;height:188px;top:83px;left:2px;position:absolute;color:rgb(33,34,33);stroke-width:9px;layer-color:rgba(0,0,0,0);margin-left: 10px;"></progress>
+          <scroll id="keyboard" scroll-x="{{true}}" onscroll="handelScroll" >
+            <div if="{{!numFlag}}" style="left: 3px; flex-direction: column;">
+              <div static style="margin-left: 0px;margin-top: 0px;height: 60px;">
+                <text class="calbtn" for="{{item in keys['full'][0]}}" @click="onSelect(item)">{{item}}</text>
+              </div>
+              <div static style="margin-left: 32px;margin-top: -5px;height: 60px;">
+                <text class="calbtn" for="{{item in keys['full'][1]}}" @click="onSelect(item)">{{item}}</text>
+              </div>
+              <div static style="margin-left: 64px;margin-top: -5px;height: 60px;">
+                <text class="calbtn" for="{{item in keys['full'][2]}}" @click="onSelect(item)">{{item}}</text>
+                <img static src="./assets/space.png" style="width: 60px;height: 60px;" @click="onBtnClick('space')" />
+              </div>
+            </div>
+            <div else style="left: 3px; flex-direction: column;">
+              <div static style="margin-left: 0px;margin-top: 0px;height: 60px;">
+                <text class="calbtn" for="{{item in keys['sign'][0]}}" @click="onSelect(item)">{{item}}</text>
+              </div>
+              <div static style="margin-left: 32px;margin-top: -5px;height: 60px;">
+                <text class="calbtn" for="{{item in keys['sign'][1]}}" @click="onSelect(item)">{{item}}</text>
+              </div>
+              <div static style="margin-left: 64px;margin-top: -5px;height: 60px;">
+                <text class="calbtn" for="{{item in keys['sign'][2]}}" @click="onSelect(item)">{{item}}</text>
+              </div>
+            </div>
+          </scroll>
+        </div>
+        <div static style="position: absolute;left: {{(screenWidth - 212)/2}}px;top: 0px;width: 212px;height: 110px;"> 
+          <div static style="position: absolute;left: 3px;top: 47px;width: 206px;height: 60px; border:3px solid rgba(255,255,255,0.06); background-color:rgb(38,38,38); border-radius:30px"></div>
+          <scroll id="cvalWaiting" scroll-x="{{true}}" style="position: absolute;left: 15px;top: 56px;width: 164px;height: 42px;">
+            <div style="position: absolute;left: 0px;top: 0px;height: 42px;padding-right:20px">
+              <text class="calbtn02" style="padding-right:10px" @click="pushCval">{{cval}}</text>
+              <text for="{{cvalList}}" show="{{resultList.length > $idx}}" class="calbtn02" style="padding-right:10px" @click="onRsSelect(resultList[$idx])">{{resultList[$idx]}}</text>
+            </div>
+          </scroll>
+          <img show="{{resultList.length > 0}}" style="position: absolute;left: 140px;top: 57px;width: 60px;height: 40px;" src="./assets/down2.png" @click="onBtnClick('down')" />
+          <img src="./assets/{{lang}}.png" style="position: absolute;top:0px;left:9px;width: 48px;height: 42px;" @click="onBtnClick('lang')" show="{{downFlag==='' && !numFlag}}" />
+          <img src="./assets/back2.png" style="position: absolute;top:0px;left:9px;width: 48px;height: 42px;" @click="onBtnClick('switchCn')" show="{{numFlag && lang==='cn'}}" />
+          <img src="./assets/123.png" style="position: absolute;top:0px;left:80px;width: 48px;height: 42px;" @click="onBtnClick('switchNum')" show="{{downFlag==='' && !numFlag && lang==='cn'}}" />
+          <img src="./assets/bigA.png" style="position: absolute;top:0px;left:80px;width: 48px;height:42px;" @click="onBtnClick('switchLow')" show="{{downFlag==='' && upperFlag && lang==='en'}}" />
+          <img src="./assets/a.png" style="position: absolute;top:0px;left:80px;width: 48px;height:42px;" @click="onBtnClick('switchUpper')" show="{{downFlag==='' && !upperFlag && lang==='en'}}" />
+          <img src="./assets/del.png" style="position: absolute;top:0px;left:155px;width: 48px;height: 42px;" @click="onBtnClick('D')" />
+        </div>
+        <!-- 这里使用show会导致每次输入都会加载全部候选列表，很卡 -->
+        <div style="position: absolute;top: 47px;width: 100%;height: 263px;background-color: black;" if="{{downFlag==='down'}}">
+          <div style="position: absolute;left: {{(screenWidth - 212)/2}}px;width: 212px;height: 263px;"> 
+            <list static class="list">
+              <list-item type="waitingRows" class="item" for="{{itemArray in resultList2}}">
+                <div class="item column center" for="{{item in itemArray}}">
+                  <input class="calbtn0" type="button" value="{{item}}" @click="onRsSelect(item)" />
+                </div>
+              </list-item>
+            </list>
+            <img static style="position: absolute;top:196px;left:66px;width: 80px;height: 60px;" src="./assets/up2.png" @click="onBtnClick('down')" />
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</template>
+
+<script>
+import vibrator from "@system.vibrator";
+import { SimpleInputMethod } from "./assets/dicUtil.js";
+function doSearchDic(word, cb) {
+  let hanzi = SimpleInputMethod.getHanzi(word);
+  if (hanzi && hanzi[0]) {
+    cb(hanzi[0]);
+  } else {
+    cb([]);
+  }
+}
+function deleteLast(t) {
+  if (t) {
+    return t.substr(0, t.length - 1);
+  }
+  return "";
+}
+export default {
+  props: {
+    hide: {
+      default: true,
+    },
+    vibratemode: {
+      default: "",
+    },
+  },
+  data: {
+    cval: "",
+    resultList: [],
+    resultList2: [],
+    waitingList: [],
+    waitingIndex: -1,
+    lastWaitingStr: "",
+    downFlag: "",
+    lang: "cn",
+    numFlag: false,
+    upperFlag: false,
+    cvalList: [0, 1, 2, 3, 4, 5],
+    percent: 0,
+    screenWidth: 212,
+    keys: {
+      full: [
+        ["Q", "W", "E", "R", "T", "Y", "U", "I", "O", "P"],
+        ["A", "S", "D", "F", "G", "H", "J", "K", "L"],
+        ["Z", "X", "C", "V", "B", "N", "M"],
+      ],
+      sign: [
+        ["1", "2", "3", "4", "5", "6", "7", "8", "9", "0"],
+        ["~", "!", "@", "#", "%", "“", "”", "*", "?", "/"],
+        ["(", ")", "-", "_", ":", ";", "，", "。", "."],
+      ],
+    },
+  },
+  onInit() {
+    if (this.maxlength) {
+      const tempCvalList = [];
+      for (let i = 0; i < 6; i++) {
+        tempCvalList.push(i);
+      }
+      this.cvalList = tempCvalList;
+    }
+    this.$watch("hide", "watchHidePropsChange");
+    this.$watch("maxlength", "watchMaxLengthPropsChange");
+  },
+  addAllTxt(txt) {
+    this.$emit("complete", { content: txt });
+  },
+  onRsSelect(txt) {
+    this.onVibrate();
+    this.cval = "";
+    this.addAllTxt(txt);
+    this.clearWaiting();
+    this.resetReslutList();
+    this.downFlag = "";
+  },
+  onBtnClick(sign) {
+    this.onVibrate();
+    switch (sign) {
+      case "AC":
+        this.cval = "";
+        this.clearWaiting();
+        this.resetReslutList();
+        break;
+      case "lang":
+        if (this.lang === "cn") {
+          this.lang = "en";
+        } else {
+          this.lang = "cn";
+        }
+        this.cval = "";
+        this.clearWaiting();
+        this.resetReslutList();
+        break;
+      case "D":
+        if (this.waitingIndex >= 0) {
+          this.clearWaiting();
+          this.resetReslutList();
+        } else if (this.cval.length > 0) {
+          this.cval = deleteLast(this.cval);
+          this.resetReslutList();
+        } else {
+          this.$emit("delete", {});
+        }
+        break;
+      case "space":
+        this.addAllTxt(" ");
+        break;
+      case "down":
+        this.downFlag = this.downFlag === "down" ? "" : "down";
+        break;
+      case "select":
+        if (this.lastWaitingStr != sign && this.lastWaitingStr) {
+          if (this.lang === "cn") {
+            this.cval += this.waitingList[this.waitingIndex];
+          } else {
+            if (this.upperFlag) {
+              this.addAllTxt(this.waitingList[this.waitingIndex].toUpperCase());
+            } else {
+              this.addAllTxt(this.waitingList[this.waitingIndex].toLowerCase());
+            }
+          }
+          this.clearWaiting();
+          this.resetReslutList();
+        }
+        break;
+      case "switchNum":
+        this.numFlag = true;
+        this.cval = "";
+        this.clearWaiting();
+        this.resetReslutList();
+        break;
+      case "switchCn":
+        this.numFlag = false;
+        break;
+      case "switchUpper":
+        this.upperFlag = true;
+        break;
+      case "switchLow":
+        this.upperFlag = false;
+        break;
+      default:
+        if (sign.length === 1) {
+          this.addAllTxt(sign);
+        } else {
+          if (this.waitingIndex >= 0) {
+            if (this.lastWaitingStr === sign) {
+              this.waitingIndex++;
+              if (this.waitingIndex >= this.lastWaitingStr.length) {
+                this.waitingIndex = 0;
+              }
+            } else {
+              if (this.lang === "cn") {
+                this.cval += this.waitingList[this.waitingIndex];
+              } else {
+                if (this.upperFlag) {
+                  this.addAllTxt(
+                    this.waitingList[this.waitingIndex].toUpperCase(),
+                  );
+                } else {
+                  this.addAllTxt(
+                    this.waitingList[this.waitingIndex].toLowerCase(),
+                  );
+                }
+              }
+              this.lastWaitingStr = sign;
+              this.waitingIndex = 0;
+              this.waitingList = sign.split("");
+            }
+          } else {
+            this.lastWaitingStr = sign;
+            this.waitingIndex = 0;
+            this.waitingList = sign.split("");
+          }
+          this.resetReslutList();
+        }
+        break;
+    }
+  },
+  clearWaiting() {
+    this.waitingList = [];
+    this.waitingIndex = -1;
+    this.lastWaitingStr = "";
+  },
+  resetReslutList() {
+    this.$element("cvalWaiting").scrollTo({
+      top: 0,
+      left: 0,
+      behavior: "smooth",
+    });
+    let watingStr = "";
+    if (this.lastWaitingStr && this.lastWaitingStr[this.waitingIndex]) {
+      watingStr = this.lastWaitingStr[this.waitingIndex];
+    }
+    if (!(this.cval + watingStr) || this.lang != "cn") {
+      this.resultList = [];
+      this.setResultListAll();
+      return;
+    }
+    this.getResultByWord(this.cval + watingStr);
+  },
+  setResultListAll() {
+    this.resultList2 = [];
+    let array = [];
+    for (let i = 0; i < this.resultList.length; i++) {
+      array.push(this.resultList[i]);
+      if (array.length === 5) {
+        this.resultList2.push(array);
+        array = [];
+      }
+    }
+    if (array.length > 0 && array.length < 5) {
+      this.resultList2.push(array);
+    }
+  },
+  getResultByWord(val) {
+    const that = this;
+    doSearchDic(val, function (data) {
+      that.resultList = data;
+      that.setResultListAll();
+    });
+  },
+  onSelect(num) {
+    this.$emit("keyDown", { content: num });
+    this.onVibrate();
+    if (this.lang === "cn" && !this.numFlag) {
+      this.cval += num.toLowerCase();
+    } else if (this.lang === "en" && !this.numFlag) {
+      if (this.upperFlag) {
+        this.addAllTxt(num.toUpperCase());
+      } else {
+        this.addAllTxt(num.toLowerCase());
+      }
+    } else {
+      this.addAllTxt(num);
+    }
+    this.resetReslutList();
+  },
+  onSelectWaiting(num) {
+    this.onVibrate();
+    if (this.lang === "cn") {
+      this.cval += this.waitingList[num].toString();
+    } else {
+      if (this.upperFlag) {
+        this.addAllTxt(this.waitingList[num].toUpperCase());
+      } else {
+        this.addAllTxt(this.waitingList[num].toLowerCase());
+      }
+    }
+    this.clearWaiting();
+    this.resetReslutList();
+  },
+  onVibrate() {
+    if (this.vibratemode != "") {
+      vibrator.vibrate({ mode: this.vibratemode });
+    }
+  },
+  handelScroll(event) {
+    let percentTemp = (event.scrollX / 633) * 100;
+    this.percent = parseInt(percentTemp <= 100 ? percentTemp : 100);
+  },
+  pushCval() {
+    this.onVibrate();
+    let temp = this.cval;
+    this.cval = "";
+    this.clearWaiting();
+    this.resetReslutList();
+    this.addAllTxt(temp);
+  }
+};
+</script>
+
+<style>
+.page {
+	width:100%;
+	position:absolute;
+	left:0;
+	bottom:0
+}
+.item {
+	height:42px;
+	flex:1;
+}
+.calbtn0 {
+	color:#fff;
+	font-size:28px;
+	background-color:rgba(38,38,38,0);
+	border-radius:0;
+	height:52px;
+	width:36px;
+	text-align:center;
+	margin-right: 5px;
+}
+.calbtn02 {
+	color:rgb(255,255,255);
+	background-color:rgba(38,38,38,0);
+	border-radius:0px;
+	font-size:32px;
+	text-align:center;
+	height:42px;
+}
+
+#keyboard {
+	position:absolute;
+	left:0px;
+	top:82px;
+	width:100%;
+	height:170px;
+}
+
+.calbtn {
+	color:rgb(255,255,255);
+	font-size:32px;
+	font-weight:bold;
+	background-color:rgb(38,38,38);
+	margin-right:3px;
+	width:60px;
+	height:60px;
+	border-radius:30px;
+	text-align:center;
+	border:3px solid rgba(255,255,255,0.06);
+}
+.list {
+	position:absolute;
+	left:3px;
+	top:0px;
+	width:206px;
+	height:186px;
+	border-radius:30px;
+	background-color:#262626;
+	border:3px solid rgba(255,255,255,0.06);
+	padding:10px;
+  align-items:center;
+}
+
+</style>

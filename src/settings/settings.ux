@@ -1,0 +1,410 @@
+<template>
+  <div class="page">
+    <!-- 添加时间显示 -->
+    <div class="time-display">
+      <text class="time-text">{{currentTime}}</text>
+    </div>
+    <div class="header">
+      <text class="title">设置</text>
+      <div class="about-button" onclick="goToAbout"><image class="about-btn-icon" src="../Common/about.png"/></div>
+    </div>
+    
+  <list class="settings-list" bounces="true">
+      <list-item type="item" class="setting-item">
+        <div class="setting-content">
+          <text class="setting-label">振动反馈</text>
+          <text class="setting-description">启用后在执行操作时会产生振动反馈</text>
+          <input 
+            type="button" 
+            class="setting-button" 
+            value="{{vibrationEnabled ? '启用' : '禁用'}}" 
+            onclick="toggleVibration"/>
+        </div>
+      </list-item>
+      
+      <list-item type="item" class="setting-item">
+        <div class="setting-content">
+          <text class="setting-label">排序方式</text>
+          <text class="setting-description">每条笔记显示的时间和排序依据</text>
+          <input 
+            type="button" 
+            class="setting-button" 
+            value="{{timeDisplayType === 'createTime' ? '创建时间' : '修改时间'}}" 
+            onclick="toggleSortOrder"/>
+        </div>
+      </list-item>
+      
+      <list-item type="item" class="setting-item">
+        <div class="setting-content">
+          <text class="setting-label">自动滚动</text>
+          <text class="setting-description">自动滚动时留有的空白</text>
+          <input 
+            type="button" 
+            class="setting-button" 
+            value="{{autoScrollType === 'noBlank' ? '不留空' : (autoScrollType === 'oneBlank' ? '留空1行' : '留空2行')}}" 
+            onclick="toggleAutoScroll"/>
+        </div>
+      </list-item>
+      
+      <list-item type="item" class="setting-item">
+        <div class="setting-content">
+          <text class="setting-label">边框宽度</text>
+          <text class="setting-description">编辑页左右两侧的边框宽度</text>
+          <input 
+            type="button" 
+            class="setting-button" 
+            value="{{borderWidth === '0px' ? '0px' : (borderWidth === '10px' ? '10px' : '20px')}}" 
+            onclick="toggleBorderWidth"/>
+        </div>
+      </list-item>
+
+    </list>
+  </div>
+</template>
+
+<script>
+import router from '@system.router'
+import { getCachedSettings, saveSettings, clearSettingsCache, notifySettingsChange } from '../Common/utils.js'
+
+export default {
+  private: {
+    vibrationEnabled: true,
+    timeDisplayType: 'createTime', // createTime 或 modifyTime
+    autoScrollType: 'oneBlank', // oneBlank 或 twoBlank
+    borderWidth: '10px', // 0px, 10px 或 20px
+    timeUpdateTimer: null, // 添加定时器变量
+    currentTime: '' // 添加当前时间变量
+  },
+  
+  onInit() {
+    this.loadVibrationSetting()
+    this.loadSortOrderSetting()
+    this.loadAutoScrollSetting()
+    this.loadBorderWidthSetting()
+    // 初始化当前时间
+    this.updateCurrentTime()
+    // 启动时间更新定时器
+    this.updateTimeDisplay()
+  },
+  
+  onShow() {
+    // 更新当前时间
+    this.updateCurrentTime()
+    // 启动时间更新定时器
+    this.updateTimeDisplay()
+  },
+  
+  onHide() {
+    // 页面隐藏时清除定时器
+    if (this.timeUpdateTimer) {
+      clearInterval(this.timeUpdateTimer)
+      this.timeUpdateTimer = null
+    }
+  },
+  
+  onDestroy() {
+    // 页面销毁时清除定时器
+    if (this.timeUpdateTimer) {
+      clearInterval(this.timeUpdateTimer)
+      this.timeUpdateTimer = null
+    }
+  },
+
+  // 返回手势
+  onBackPress() {
+    this.goBack() 
+  },
+  
+  // 跳转到关于页面
+  goToAbout() {
+    router.push({
+      uri: '/about'
+    });
+  },
+  
+  loadVibrationSetting() {
+    getCachedSettings((err, settings) => {
+      if (!err && settings) {
+        this.vibrationEnabled = settings.vibrationEnabled !== false; // 默认为true
+      } else {
+        this.vibrationEnabled = true;
+      }
+    });
+  },
+  
+  loadSortOrderSetting() {
+    getCachedSettings((err, settings) => {
+      if (!err && settings) {
+        this.timeDisplayType = settings.timeDisplayType || 'createTime';
+      } else {
+        this.timeDisplayType = 'createTime';
+      }
+    });
+  },
+  
+  loadAutoScrollSetting() {
+    getCachedSettings((err, settings) => {
+      if (!err && settings) {
+        this.autoScrollType = settings.autoScrollType || 'oneBlank';
+      } else {
+        this.autoScrollType = 'oneBlank';
+      }
+    });
+  },
+  
+  loadBorderWidthSetting() {
+    getCachedSettings((err, settings) => {
+      if (!err && settings) {
+        this.borderWidth = settings.borderWidth || '10px';
+      } else {
+        this.borderWidth = '10px';
+      }
+    });
+  },
+  
+  saveSettings() {
+    const settings = {
+      vibrationEnabled: this.vibrationEnabled,
+      timeDisplayType: this.timeDisplayType,
+      autoScrollType: this.autoScrollType,
+      borderWidth: this.borderWidth
+    };
+    
+    saveSettings(settings, (err) => {
+      if (err) {
+        console.log('设置保存失败', err);
+      } else {
+        console.log('设置保存成功');
+        // 通知其他页面设置已更改
+        clearSettingsCache();
+      }
+    });
+  },
+  
+  // 格式化当前时间显示（HH:MM格式）
+  updateCurrentTime() {
+    const now = new Date();
+    const hour = now.getHours().toString().padStart(2, '0');
+    const minute = now.getMinutes().toString().padStart(2, '0');
+    this.currentTime = `${hour}:${minute}`;
+  },
+  
+  // 更新时间显示
+  updateTimeDisplay() {
+    // 页面隐藏时清除已有定时器
+    if (this.timeUpdateTimer) {
+      clearInterval(this.timeUpdateTimer)
+      this.timeUpdateTimer = null
+    }
+    
+    this.timeUpdateTimer = setInterval(() => {
+      // 更新当前时间
+      this.updateCurrentTime();
+    }, 10000); 
+  },
+  
+  toggleVibration() {
+    this.vibrationEnabled = !this.vibrationEnabled;
+    // 立即通知设置变化，不等待保存完成
+    const settings = {
+      vibrationEnabled: this.vibrationEnabled,
+      timeDisplayType: this.timeDisplayType,
+      autoScrollType: this.autoScrollType,
+      borderWidth: this.borderWidth
+    };
+    notifySettingsChange(settings);
+    // 只更新UI，不立即保存
+    this.$forceUpdate();
+  },
+  
+  toggleSortOrder() {
+    this.timeDisplayType = this.timeDisplayType === 'createTime' ? 'modifyTime' : 'createTime';
+    // 立即通知设置变化，不等待保存完成
+    const settings = {
+      vibrationEnabled: this.vibrationEnabled,
+      timeDisplayType: this.timeDisplayType,
+      autoScrollType: this.autoScrollType,
+      borderWidth: this.borderWidth
+    };
+    notifySettingsChange(settings);
+    // 只更新UI，不立即保存
+    this.$forceUpdate();
+  },
+  
+  toggleAutoScroll() {
+    // 在三种模式之间切换：不留空 -> 留空1行 -> 留空2行 -> 不留空...
+    if (this.autoScrollType === 'noBlank') {
+      this.autoScrollType = 'oneBlank';
+    } else if (this.autoScrollType === 'oneBlank') {
+      this.autoScrollType = 'twoBlank';
+    } else {
+      this.autoScrollType = 'noBlank';
+    }
+    // 立即通知设置变化，不等待保存完成
+    const settings = {
+      vibrationEnabled: this.vibrationEnabled,
+      timeDisplayType: this.timeDisplayType,
+      autoScrollType: this.autoScrollType,
+      borderWidth: this.borderWidth
+    };
+    notifySettingsChange(settings);
+    // 只更新UI，不立即保存
+    this.$forceUpdate();
+  },
+  
+  toggleBorderWidth() {
+    // 在三种模式之间切换：0px -> 10px -> 20px -> 0px...
+    if (this.borderWidth === '0px') {
+      this.borderWidth = '10px';
+    } else if (this.borderWidth === '10px') {
+      this.borderWidth = '20px';
+    } else {
+      this.borderWidth = '0px';
+    }
+    // 立即通知设置变化，不等待保存完成
+    const settings = {
+      vibrationEnabled: this.vibrationEnabled,
+      timeDisplayType: this.timeDisplayType,
+      autoScrollType: this.autoScrollType,
+      borderWidth: this.borderWidth
+    };
+    notifySettingsChange(settings);
+    // 只更新UI，不立即保存
+    this.$forceUpdate();
+  },
+  
+  goBack() {
+    // 保存设置并等待完成后再返回
+    const settings = {
+      vibrationEnabled: this.vibrationEnabled,
+      timeDisplayType: this.timeDisplayType,
+      autoScrollType: this.autoScrollType,
+      borderWidth: this.borderWidth
+    };
+    
+    saveSettings(settings, (err) => {
+      if (err) {
+        console.log('设置保存失败', err);
+      } else {
+        console.log('设置保存成功');
+        // 通知其他页面设置已更改
+        clearSettingsCache();
+      }
+    });
+  }
+}
+</script>
+
+<style>
+.page {
+  flex-direction: column;
+  background-color: #000000;
+  width: 100%;
+  height: 100%;
+}
+
+.time-display {
+  height: 24px;
+  justify-content: center;
+  align-items: center;
+  border-radius: 12px; /* 添加圆角 */
+  margin: 5px;
+  padding: 5px;
+}
+.time-text {
+  font-size: 20px;
+  font-weight: bold;
+  color: #999999;
+}
+
+.header {
+  height: 60px;
+  padding-left: 20px;
+  padding-right: 20px;
+  border-bottom-width: 2px;
+  border-bottom-color: #333333;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.title {
+  font-size: 30px;
+  color: #ffffff;
+}
+
+.about-button {
+  width: 50px;
+  height: 50px;
+  background-color: rgb(38,38,38);
+  border-radius: 25px;
+  margin-right: 3px;
+  justify-content: center;
+  align-items: center;
+  border: 3px solid rgba(255,255,255,0.06); 
+}
+
+.about-btn-icon{
+  height: 16px;
+  width: 16px;
+}
+.settings-list {
+  flex: 1;
+  width: 100%;
+  padding: 10px;
+}
+
+.setting-item {
+  width: 100%;
+  background-color: #1f1f1f;
+  border-radius: 12px;
+  margin-bottom: 10px;
+  height: 200px;
+  border: 3px solid rgba(255,255,255,0.06);
+}
+
+.setting-content {
+  flex-direction: column;
+  justify-content: space-between;
+  align-items: center;
+  padding: 20px;
+  height: 100%;
+}
+
+.setting-label {
+  font-size: 32px;
+  color: #ffffff;
+  margin-bottom: 2px;
+}
+
+.setting-description {
+  font-size: 18px;
+  color: #999999;
+  text-align: center;
+}
+
+.setting-button {
+  width: 150px;
+  height: 60px;
+  background-color: #262626;
+  color: #ffffff;
+  font-size: 28px;
+  border-radius: 12px;
+  border: 3px solid rgba(255,255,255,0.06);
+  text-align: center;
+}
+
+.done-item {
+  width: 100%;
+  height: 120px;
+}
+
+.done-button {
+  width: 100%;
+  height: 80px;
+  background-color: #262626;
+  color: #ffffff;
+  font-size: 32px;
+  border-radius: 12px;
+  border: 3px solid rgba(255,255,255,0.06);
+}
+</style>

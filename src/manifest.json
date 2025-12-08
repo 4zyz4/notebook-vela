@@ -1,0 +1,52 @@
+{
+  "package": "com.4zyz4.notebook",
+  "name": "笔记本",
+  "versionName": "1.5.0",
+  "versionCode": 17,
+  "icon": "/Common/logo.png",
+  "deviceTypeList": ["watch"],
+  "minAPILevel": 2,
+  "features": [
+	{
+		"name": "system.router"
+	},
+	{
+		"name": "system.file"
+	},
+	{
+		"name": "system.prompt"
+	},
+	{
+		"name": "system.vibrator"
+	},
+	{
+		"name": "system.device"
+	}
+],
+  "permissions": [],
+  "config": {
+    "logLevel": "debug",
+    "designWidth": 212
+  },
+  "router": {
+    "entry": "index",
+    "mode": "single",
+    "pages": {
+      "index": {
+        "component": "index"
+      },
+      "edit": {
+        "component": "edit"
+      },
+      "settings": {
+        "component": "settings"
+      },
+      "about": {
+        "component": "about"
+      }
+    }
+  },
+  "display": {
+    "backgroundColor": "#000000"
+  }
+}
