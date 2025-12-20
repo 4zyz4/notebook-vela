@@ -13,7 +13,7 @@
     <list-item type="app-info" class="app-info" style="height: 300px;">
         <image src="/Common/logo.png" class="logo"></image>
         <text class="app-name">笔记本</text>
-        <text class="info">版本 2.0.0</text>
+        <text class="info">版本 1.5.0</text>
         <text class="info">作者:4zyz4</text>
     </list-item> 
 
