@@ -421,6 +421,9 @@ export default {
     
     // 恢复文件相关
     lastSavedRecoveryText: '', // 上次保存的恢复文本内容
+    
+    // 用于保存原始笔记ID，确保编辑时始终指向正确的笔记
+    originalNoteId: null,
   },
   
   onInit() {
@@ -492,11 +495,42 @@ export default {
       // 更新当前时间
       this.updateCurrentTime();
       
+      // 如果是编辑模式且尚未记录原始笔记ID，则获取原始笔记ID
+      if (this.index >= 0 && !this.originalNoteId) {
+        this.getOriginalNoteId();
+      }
+      
       // 启动主定时器
       this.startMainTimer();
     } catch (e) {
       console.error('onShow方法出错:', e);
     }
+  },
+
+  // 获取原始笔记ID
+  getOriginalNoteId() {
+    import('../Common/utils.js').then(utils => {
+      utils.readMetadata((err, metadata) => {
+        if (err) {
+          console.error("读取元数据失败:", err);
+          return;
+        }
+        
+        // 获取当前笔记的ID
+        const noteIds = Object.keys(metadata.notes || {}).sort((a, b) => {
+          return metadata.notes[b].createTime - metadata.notes[a].createTime;
+        });
+        
+        if (this.index >= noteIds.length) {
+          console.error("笔记索引超出范围");
+          return;
+        }
+        
+        // 记录原始笔记ID，确保后续保存始终使用这个ID
+        this.originalNoteId = noteIds[this.index];
+        console.log("记录原始笔记ID:", this.originalNoteId);
+      });
+    });
   },
   
   onHide() {
@@ -879,13 +913,11 @@ export default {
               return;
             }
             
-            // 获取当前笔记的ID
-            const noteIds = Object.keys(metadata.notes || {}).sort((a, b) => {
-              return metadata.notes[b].createTime - metadata.notes[a].createTime;
-            });
+            // 使用原始笔记ID而不是重新计算，避免因元数据变化导致保存错误
+            const noteId = this.originalNoteId;
             
-            if (this.index >= noteIds.length) {
-              console.error("笔记索引超出范围");
+            if (!noteId) {
+              console.error("原始笔记ID未定义");
               this.isSaving = false;
               prompt.showToast({
                 message: '保存失败'
@@ -893,7 +925,8 @@ export default {
               return;
             }
             
-            const noteId = noteIds[this.index];
+            // 保存原始笔记ID，以便后续操作使用
+            this.originalNoteId = noteId;
             
             // 更新笔记内容
             utils.saveNoteFile(noteId, content, (err) => {
@@ -1187,7 +1220,9 @@ export default {
       import('../Common/utils.js').then(utils => {
         // 在恢复文件中添加时间戳
         const timestamp = Date.now();
-        const noteId = `recovery_${timestamp}`;
+        
+        // 使用固定ID保存恢复内容，而不是每次生成新ID
+        const noteId = 'current_editing_recovery';
         
         // 保存恢复文件
         utils.saveNoteFile(noteId, content, (err) => {
@@ -1205,7 +1240,10 @@ export default {
             metadata.notes[noteId] = {
               createTime: timestamp,
               modifyTime: timestamp,
-              recovery: true
+              recovery: true,
+              // 保存原始笔记信息，以便在保存时能找到正确的笔记
+              originalNoteIndex: this.index,
+              originalNoteId: this.originalNoteId || null
             };
             
             utils.saveMetadata(metadata, (err) => {
