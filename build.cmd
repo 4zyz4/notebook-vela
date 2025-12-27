@@ -1,0 +1,1 @@
+ npx aiot release --optimize-css-attr --enable-jsc --enable-image-png8 --drop-console true
