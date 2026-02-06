@@ -842,6 +842,13 @@ export default {
     }
   },
   
+  // 统一处理隐藏输入法并更新UI
+  hideInputAndRefreshUI() {
+    this.hideInput = false;
+    this.$nextTick(() => {
+      this.scrollToBottom();
+    });
+  },
   // 返回操作
   back() {
     // 检查笔记是否已保存或者内容为空
@@ -1065,7 +1072,7 @@ export default {
       // 保存成功后关闭菜单
       this.showMenuDialog = false;
       // 恢复输入法显示状态
-      this.hideInput = false;
+      this.hideInputAndRefreshUI();
       
       // 保存成功后清除恢复文件
       this.clearRecoveryFile();
@@ -1093,11 +1100,7 @@ export default {
   // 关闭二维码对话框
   closeQRDialog() {
     this.showQRDialog = false;
-    this.hideInput = false;
-    
-    this.$nextTick(() => {
-      this.scrollToBottom()
-    })
+    this.hideInputAndRefreshUI();
   },
   
   // 删除笔记
@@ -1110,21 +1113,13 @@ export default {
   // 取消菜单
   cancelMenu() {
     this.showMenuDialog = false;
-    this.hideInput = false;
-    
-    this.$nextTick(() => {
-      this.scrollToBottom()
-    })
+    this.hideInputAndRefreshUI();
   },
   
   // 取消删除
   cancelDelete() {
     this.showConfirmDialog = false;
-    this.hideInput = false;
-    
-    this.$nextTick(() => {
-      this.scrollToBottom()
-    })
+    this.hideInputAndRefreshUI();
   },
   
   // 确认删除
@@ -1216,11 +1211,7 @@ export default {
   // 取消退出
   cancelExit() {
     this.showExitConfirm = false;
-    this.hideInput = false;
-    
-    this.$nextTick(() => {
-      this.scrollToBottom()
-    })
+    this.hideInputAndRefreshUI();
   },
   
   // 确认退出
