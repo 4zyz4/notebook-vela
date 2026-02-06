@@ -958,9 +958,18 @@ export default {
             });
           });
         } else {
-          // 添加新笔记
-          const createTime = modifyTime;
-          const noteId = createTime.toString(); // 使用创建时间作为笔记ID
+          // 添加新笔记 - 只有在originalNoteId未定义时才创建新ID
+          let noteId;
+          if (this.originalNoteId) {
+            // 如果已经设置了原始笔记ID，使用它
+            noteId = this.originalNoteId;
+          } else {
+            // 否则创建新的笔记ID
+            const createTime = modifyTime;
+            noteId = createTime.toString(); // 使用创建时间作为笔记ID
+            // 记录原始笔记ID
+            this.originalNoteId = noteId;
+          }
           
           // 保存笔记文件
           utils.saveNoteFile(noteId, content, (err) => {
@@ -981,10 +990,16 @@ export default {
               }
               
               // 添加新笔记的元数据
-              metadata.notes[noteId] = {
-                createTime: createTime,
-                modifyTime: modifyTime
-              };
+              if (!metadata.notes[noteId]) {
+                // 只有在笔记不存在时才设置创建时间
+                metadata.notes[noteId] = {
+                  createTime: parseInt(noteId), // 使用noteId转换为数字作为时间戳
+                  modifyTime: modifyTime
+                };
+              } else {
+                // 如果笔记已存在，只更新修改时间
+                metadata.notes[noteId].modifyTime = modifyTime;
+              }
               
               // 保存元数据
               utils.saveMetadata(metadata, (err) => {
@@ -1010,6 +1025,27 @@ export default {
         message: '保存失败'
       });
     }
+  },
+  
+  // 根据笔记ID获取其索引
+  getNoteIndexById(noteId) {
+    return new Promise((resolve) => {
+      import('../Common/utils.js').then(utils => {
+        utils.readMetadata((err, metadata) => {
+          if (err) {
+            console.error("读取元数据失败:", err);
+            resolve(-1);
+            return;
+          }
+          
+          const noteIds = Object.keys(metadata.notes || {}).sort((a, b) => {
+            return metadata.notes[b].createTime - metadata.notes[a].createTime;
+          });
+          
+          resolve(noteIds.indexOf(noteId));
+        });
+      });
+    });
   },
   
   // 处理保存成功的逻辑
@@ -1108,15 +1144,29 @@ export default {
             return;
           }
           
-          // 获取笔记ID列表并排序
-          const noteIds = Object.keys(metadata.notes || {}).sort((a, b) => {
-            return metadata.notes[b].createTime - metadata.notes[a].createTime;
-          });
+          let noteId = null;
           
-          // 使用原始索引删除笔记
-          if (this.index >= 0 && this.index < noteIds.length) {
-            const noteId = noteIds[this.index];
-            
+          // 如果是编辑模式，尝试使用原始笔记ID
+          if (this.index >= 0) {
+            if (this.originalNoteId) {
+              noteId = this.originalNoteId;
+            } else {
+              // 获取笔记ID列表并排序
+              const noteIds = Object.keys(metadata.notes || {}).sort((a, b) => {
+                return metadata.notes[b].createTime - metadata.notes[a].createTime;
+              });
+              
+              // 使用原始索引删除笔记
+              if (this.index >= 0 && this.index < noteIds.length) {
+                noteId = noteIds[this.index];
+              }
+            }
+          } else {
+            // 如果是新笔记，使用原始笔记ID
+            noteId = this.originalNoteId;
+          }
+          
+          if (noteId && metadata.notes[noteId]) {
             // 删除笔记文件
             utils.deleteNoteFile(noteId, (err) => {
               if (err) {
@@ -1135,7 +1185,7 @@ export default {
               });
             });
           } else {
-            console.warn("索引超出范围或笔记不存在");
+            console.warn("笔记ID未找到或笔记不存在");
             this.handleDeleteComplete();
           }
         });
