@@ -354,10 +354,9 @@
 
 <script>
 import router from '@system.router'
-import file from '@system.file'
 import prompt from '@system.prompt'
 import vibrator from '@system.vibrator'
-import { getCachedSettings, notifyNotesChange, readMetadata, saveNoteFile, saveMetadata } from '../Common/utils.js'
+import { getCachedSettings, notifyNotesChange } from '../Common/utils.js'
 
 export default {
   private: {
@@ -610,6 +609,17 @@ export default {
     this.currentTime = `${hour}:${minute}`;
   },
   
+  // 统一处理输入法状态更新
+  updateInputState(isVisible) {
+    this.hideInput = !isVisible;
+    
+    if (this.cursorPosition === this.currentText.length && isVisible) {
+      this.$nextTick(() => {
+        this.scrollToBottom();
+      });
+    }
+  },
+  
   // 切换输入法显示状态
   toggleInputMethod() {
     try {
@@ -624,18 +634,14 @@ export default {
           }
         }
       });
-      this.hideInput = !this.hideInput;
+      
+      // 使用统一的函数替代直接赋值
+      this.updateInputState(this.hideInput);
             
     } catch (e) {
       console.error('切换输入法显示状态时出错:', e);
     }
     console.log('切换输入法显示状态成功');
-    this.$nextTick(() => {
-      if (!this.hideInput) {
-        this.scrollToBottom()
-      }
-    })
-    
   },
   
   // 获取光标前的文本
@@ -842,13 +848,6 @@ export default {
     }
   },
   
-  // 统一处理隐藏输入法并更新UI
-  hideInputAndRefreshUI() {
-    this.hideInput = false;
-    this.$nextTick(() => {
-      this.scrollToBottom();
-    });
-  },
   // 返回操作
   back() {
     // 检查笔记是否已保存或者内容为空
@@ -859,7 +858,7 @@ export default {
     } else {
       // 如果未保存且有内容，则显示确认对话框
       this.showExitConfirm = true;
-      this.hideInput = true;
+      this.updateInputState(false);;
     }
   },
   
@@ -871,7 +870,7 @@ export default {
   // 显示菜单
   showMenu() {
     this.showMenuDialog = true;
-    this.hideInput = true;
+    this.updateInputState(false);
   },
   
   // 保存笔记
@@ -1072,7 +1071,7 @@ export default {
       // 保存成功后关闭菜单
       this.showMenuDialog = false;
       // 恢复输入法显示状态
-      this.hideInputAndRefreshUI();
+      this.updateInputState(true);
       
       // 保存成功后清除恢复文件
       this.clearRecoveryFile();
@@ -1094,32 +1093,32 @@ export default {
     this.showMenuDialog = false;
     this.noteContentForQR = this.currentText;
     this.showQRDialog = true;
-    this.hideInput = true;
+    this.updateInputState(false);
   },
   
   // 关闭二维码对话框
   closeQRDialog() {
     this.showQRDialog = false;
-    this.hideInputAndRefreshUI();
+    this.updateInputState(true);
   },
   
   // 删除笔记
   deleteNote() {
     this.showMenuDialog = false;
     this.showConfirmDialog = true;
-    this.hideInput = true;
+    this.updateInputState(false);
   },
   
   // 取消菜单
   cancelMenu() {
     this.showMenuDialog = false;
-    this.hideInputAndRefreshUI();
+    this.updateInputState(true);
   },
   
   // 取消删除
   cancelDelete() {
     this.showConfirmDialog = false;
-    this.hideInputAndRefreshUI();
+    this.updateInputState(true);
   },
   
   // 确认删除
@@ -1211,7 +1210,7 @@ export default {
   // 取消退出
   cancelExit() {
     this.showExitConfirm = false;
-    this.hideInputAndRefreshUI();
+    this.updateInputState(true);
   },
   
   // 确认退出
