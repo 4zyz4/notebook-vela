@@ -64,7 +64,7 @@
 
 <script>
 import router from '@system.router'
-import { getCachedSettings, saveSettings, notifySettingsChange } from '../Common/utils.js'
+import { getCachedSettings, saveSettings} from '../Common/utils.js'
 
 export default {
   private: {
