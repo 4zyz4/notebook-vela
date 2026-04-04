@@ -707,7 +707,6 @@ export default {
     import('../Common/utils.js').then(utils => {
       try{
         const modifyTime = Date.now();
-        const createTime = this.createTime || Date.now(); // 使用打开页面时设置的创建时间
         
         if (this.index >= 0) {
           // 编辑现有笔记
