@@ -182,7 +182,7 @@
 import router from '@system.router'
 import prompt from '@system.prompt'
 import vibrator from '@system.vibrator'
-import {notifyNotesChange } from '../Common/utils.js'
+import {notifyNotesChange, getCachedSettings } from '../Common/utils.js'
 
 export default {
   private: {
@@ -204,26 +204,26 @@ export default {
     showConfirmDialog: false,
     showQRDialog: false,
     showExitConfirm: false,
-    
+
     // 主定时器
     mainTimer: null,
     // 定时器计数器
     timeUpdateCounter: 0,   // 用于每10秒更新时间
-    
+
     // 操作计数器（用于恢复文件）
     operationCounter: 0,
     maxOperationsBeforeRecovery: 5,
-    
+
     // 二维码内容
     noteContentForQR: '',
-        
+
     // 自动滚动设置
     autoScrollType: 'oneBlank', // 默认为留空1行
-    
-    
+
+
     // 光标位置相关
     cursorPosition: 0, // 光标位置，默认在末尾
-    
+
     // 触摸事件相关
     touchStartX: 0,
     touchStartY: 0,
@@ -235,17 +235,19 @@ export default {
     touchStartPosition: 0, // 记录触摸开始时光标的位置
     lastMoveTime: 0, // 记录上次移动的时间
     lastDeltaX: 0, // 记录上次的水平位移
-    
+
     // 恢复文件相关
     lastSavedRecoveryText: '', // 上次保存的恢复文本内容
-    
+
     // 用于保存原始笔记ID，确保编辑时始终指向正确的笔记
     originalNoteId: null,
   },
-  
+
   onInit() {
     try {
-      // 初始化设置
+      // 加载设置
+      this.loadSettings();
+      
       // 设置创建时间为打开页面的时间
       this.createTime = Date.now();
 
@@ -283,6 +285,17 @@ export default {
       this.currentText = "";
       this.hideInput = false;
     }
+  },
+
+  // 加载设置
+  loadSettings() {
+    getCachedSettings((err, settings) => {
+      if (!err && settings) {
+        this.vibrateMode = settings.vibrationEnabled !== false ? 'short' : '';
+        this.borderWidth = settings.borderWidth || '10px';
+        this.autoScrollType = settings.autoScrollType || 'oneBlank';
+      }
+    });
   },
   
   onReady() {

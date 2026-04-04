@@ -64,7 +64,7 @@
 
 <script>
 import router from '@system.router'
-import { getCachedSettings, saveSettings, clearSettingsCache, notifySettingsChange } from '../Common/utils.js'
+import { getCachedSettings, saveSettings, notifySettingsChange } from '../Common/utils.js'
 
 export default {
   private: {
@@ -75,25 +75,22 @@ export default {
     timeUpdateTimer: null, // 添加定时器变量
     currentTime: '' // 添加当前时间变量
   },
-  
+
   onInit() {
-    this.loadVibrationSetting()
-    this.loadSortOrderSetting()
-    this.loadAutoScrollSetting()
-    this.loadBorderWidthSetting()
+    this.loadAllSettings()
     // 初始化当前时间
     this.updateCurrentTime()
     // 启动时间更新定时器
     this.updateTimeDisplay()
   },
-  
+
   onShow() {
     // 更新当前时间
     this.updateCurrentTime()
     // 启动时间更新定时器
     this.updateTimeDisplay()
   },
-  
+
   onHide() {
     // 页面隐藏时清除定时器
     if (this.timeUpdateTimer) {
@@ -101,7 +98,7 @@ export default {
       this.timeUpdateTimer = null
     }
   },
-  
+
   onDestroy() {
     // 页面销毁时清除定时器
     if (this.timeUpdateTimer) {
@@ -112,71 +109,42 @@ export default {
 
   // 返回手势
   onBackPress() {
-    this.goBack() 
+    this.goBack()
   },
-  
+
   // 跳转到关于页面
   goToAbout() {
     router.push({
       uri: '/about'
     });
   },
-  
-  loadVibrationSetting() {
+
+  // 统一加载所有设置
+  loadAllSettings() {
     getCachedSettings((err, settings) => {
       if (!err && settings) {
-        this.vibrationEnabled = settings.vibrationEnabled !== false; // 默认为true
-      } else {
-        this.vibrationEnabled = true;
-      }
-    });
-  },
-  
-  loadSortOrderSetting() {
-    getCachedSettings((err, settings) => {
-      if (!err && settings) {
+        this.vibrationEnabled = settings.vibrationEnabled !== false;
         this.timeDisplayType = settings.timeDisplayType || 'createTime';
-      } else {
-        this.timeDisplayType = 'createTime';
-      }
-    });
-  },
-  
-  loadAutoScrollSetting() {
-    getCachedSettings((err, settings) => {
-      if (!err && settings) {
         this.autoScrollType = settings.autoScrollType || 'oneBlank';
-      } else {
-        this.autoScrollType = 'oneBlank';
-      }
-    });
-  },
-  
-  loadBorderWidthSetting() {
-    getCachedSettings((err, settings) => {
-      if (!err && settings) {
         this.borderWidth = settings.borderWidth || '10px';
-      } else {
-        this.borderWidth = '10px';
       }
     });
   },
-  
-  saveSettings() {
+
+  // 保存设置到文件
+  saveCurrentSettings() {
     const settings = {
       vibrationEnabled: this.vibrationEnabled,
       timeDisplayType: this.timeDisplayType,
       autoScrollType: this.autoScrollType,
       borderWidth: this.borderWidth
     };
-    
+
     saveSettings(settings, (err) => {
       if (err) {
         console.log('设置保存失败', err);
       } else {
         console.log('设置保存成功');
-        // 通知其他页面设置已更改
-        clearSettingsCache();
       }
     });
   },
@@ -205,32 +173,18 @@ export default {
   
   toggleVibration() {
     this.vibrationEnabled = !this.vibrationEnabled;
-    // 立即通知设置变化，不等待保存完成
-    const settings = {
-      vibrationEnabled: this.vibrationEnabled,
-      timeDisplayType: this.timeDisplayType,
-      autoScrollType: this.autoScrollType,
-      borderWidth: this.borderWidth
-    };
-    notifySettingsChange(settings);
-    // 只更新UI，不立即保存
+    // 立即保存设置
+    this.saveCurrentSettings();
     this.$forceUpdate();
   },
-  
+
   toggleSortOrder() {
     this.timeDisplayType = this.timeDisplayType === 'createTime' ? 'modifyTime' : 'createTime';
-    // 立即通知设置变化，不等待保存完成
-    const settings = {
-      vibrationEnabled: this.vibrationEnabled,
-      timeDisplayType: this.timeDisplayType,
-      autoScrollType: this.autoScrollType,
-      borderWidth: this.borderWidth
-    };
-    notifySettingsChange(settings);
-    // 只更新UI，不立即保存
+    // 立即保存设置
+    this.saveCurrentSettings();
     this.$forceUpdate();
   },
-  
+
   toggleAutoScroll() {
     // 在三种模式之间切换：不留空 -> 留空1行 -> 留空2行 -> 不留空...
     if (this.autoScrollType === 'noBlank') {
@@ -240,18 +194,11 @@ export default {
     } else {
       this.autoScrollType = 'noBlank';
     }
-    // 立即通知设置变化，不等待保存完成
-    const settings = {
-      vibrationEnabled: this.vibrationEnabled,
-      timeDisplayType: this.timeDisplayType,
-      autoScrollType: this.autoScrollType,
-      borderWidth: this.borderWidth
-    };
-    notifySettingsChange(settings);
-    // 只更新UI，不立即保存
+    // 立即保存设置
+    this.saveCurrentSettings();
     this.$forceUpdate();
   },
-  
+
   toggleBorderWidth() {
     // 在三种模式之间切换：0px -> 10px -> 20px -> 0px...
     if (this.borderWidth === '0px') {
@@ -261,36 +208,13 @@ export default {
     } else {
       this.borderWidth = '0px';
     }
-    // 立即通知设置变化，不等待保存完成
-    const settings = {
-      vibrationEnabled: this.vibrationEnabled,
-      timeDisplayType: this.timeDisplayType,
-      autoScrollType: this.autoScrollType,
-      borderWidth: this.borderWidth
-    };
-    notifySettingsChange(settings);
-    // 只更新UI，不立即保存
+    // 立即保存设置
+    this.saveCurrentSettings();
     this.$forceUpdate();
   },
-  
+
   goBack() {
-    // 保存设置并等待完成后再返回
-    const settings = {
-      vibrationEnabled: this.vibrationEnabled,
-      timeDisplayType: this.timeDisplayType,
-      autoScrollType: this.autoScrollType,
-      borderWidth: this.borderWidth
-    };
-    
-    saveSettings(settings, (err) => {
-      if (err) {
-        console.log('设置保存失败', err);
-      } else {
-        console.log('设置保存成功');
-        // 通知其他页面设置已更改
-        clearSettingsCache();
-      }
-    });
+    router.back();
   }
 }
 </script>

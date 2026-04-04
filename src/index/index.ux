@@ -52,13 +52,9 @@ export default {
     timeDisplayType: 'createTime', // 从设置中读取
     timeUpdateTimer: null,
     currentTime: '', // 添加当前时间变量
-    lastSettingsLoad: 0, // 上次加载设置的时间
-    settingsCache: null, // 设置缓存
-    notesCache: null, // 笔记缓存
-    lastNotesLoad: 0, // 上次加载笔记的时间
-    notesCacheDuration: 5000 // 笔记缓存5秒
+    lastSettingsLoad: 0 // 上次加载设置的时间
   },
-  
+
   onInit() {
     this.loadSettings()
     this.loadNotes()
@@ -71,17 +67,10 @@ export default {
     // 添加笔记变化监听器
     addNotesListener(this.onNotesChange.bind(this));
   },
-  
+
   onShow() {
     // 每次页面显示时都重新加载设置和笔记列表
-    // 清除设置缓存以确保获取最新设置
-    this.settingsCache = null;
-    this.lastSettingsLoad = 0;
-    // 清除笔记缓存以确保获取最新笔记
-    this.notesCache = null;
-    this.lastNotesLoad = 0;
-
-    this.loadSettings(true)
+    this.loadSettings()
     this.loadNotes()
     // 确保隐藏加载对话框（特别是从edit页面返回时）
     this.showLoading = false;
@@ -153,24 +142,11 @@ export default {
   // 笔记变化回调
   onNotesChange() {
     console.log('笔记已更改，重新加载笔记列表');
-    // 清除笔记缓存并重新加载
-    this.notesCache = null;
-    this.lastNotesLoad = 0;
     this.loadNotes();
   },
-  
-  loadSettings(forceReload = false) {
-    // 检查是否需要重新加载设置（限制频率）
-    const now = Date.now();
-    if (!forceReload && this.settingsCache && (now - this.lastSettingsLoad) < 5000) {
-      // 使用缓存的设置
-      this.applySettings(this.settingsCache);
-      return;
-    }
-    
+
+  loadSettings() {
     getCachedSettings((err, settings) => {
-      this.settingsCache = settings;
-      this.lastSettingsLoad = now;
       this.applySettings(settings);
     });
   },
@@ -191,14 +167,6 @@ export default {
   },
   
   loadNotes() {
-    const now = Date.now();
-    // 检查笔记缓存
-    if (this.notesCache && (now - this.lastNotesLoad) < this.notesCacheDuration) {
-      this.notes = this.notesCache;
-      this.loading = false;
-      return;
-    }
-
     // 显示加载提示
     this.loading = true;
 
@@ -207,8 +175,6 @@ export default {
         if (err) {
           console.log("读取元数据失败:", err);
           this.notes = [];
-          this.notesCache = [];
-          this.lastNotesLoad = now;
           this.loading = false;
           return;
         }
@@ -241,14 +207,13 @@ export default {
           // 如果没有正常笔记，只有恢复文件
           if (totalCount === 0 && !hasRecovery) {
             this.notes = [];
-            this.notesCache = [];
-            this.lastNotesLoad = now;
             this.loading = false;
             return;
           }
 
           // 如果有恢复文件，添加到笔记列表开头
           if (hasRecovery) {
+            const now = Date.now();
             const recoveryTimestamp = now; // 使用当前时间作为恢复笔记的时间
             loadedNotes.push({
               content: recoveryContent,
@@ -263,8 +228,6 @@ export default {
           // 如果没有任何正常笔记，只有恢复文件
           if (totalCount === 0) {
             this.notes = loadedNotes.filter(note => note !== undefined);
-            this.notesCache = this.notes;
-            this.lastNotesLoad = now;
             this.loading = false;
             return;
           }
@@ -301,8 +264,6 @@ export default {
               if (loadedCount === totalCount) {
                 // 过滤掉加载失败的笔记
                 this.notes = loadedNotes.filter(note => note !== undefined);
-                this.notesCache = this.notes;
-                this.lastNotesLoad = now;
                 this.loading = false;
               }
             });
@@ -312,8 +273,6 @@ export default {
     }).catch(err => {
       console.error("导入工具模块失败:", err);
       this.notes = [];
-      this.notesCache = [];
-      this.lastNotesLoad = now;
       this.loading = false;
     });
   },
