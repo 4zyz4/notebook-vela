@@ -346,3 +346,82 @@ export function readMetadata(callback) {
     if (callback) callback(err);
   });
 }
+
+// 保存恢复笔记到recovery.txt
+export function saveRecoveryFile(content, callback) {
+  import('@system.file').then(file => {
+    if (!file || !file.default) {
+      console.error('无法导入文件系统模块');
+      if (callback) callback(new Error('Failed to import file system module'));
+      return;
+    }
+
+    file.default.writeText({
+      uri: 'internal://files/recovery.txt',
+      text: content,
+      success: () => {
+        console.log('恢复笔记文件 recovery.txt 保存成功');
+        if (callback) callback(null);
+      },
+      fail: (data, code) => {
+        console.error(`保存恢复笔记文件失败: ${code}`, data);
+        if (callback) callback(new Error(`Failed to save recovery file: ${code}`));
+      }
+    });
+  }).catch(err => {
+    console.error('导入文件系统模块时出错:', err);
+    if (callback) callback(err);
+  });
+}
+
+// 读取恢复笔记文件
+export function readRecoveryFile(callback) {
+  import('@system.file').then(file => {
+    if (!file || !file.default) {
+      console.error('无法导入文件系统模块');
+      if (callback) callback(new Error('Failed to import file system module'));
+      return;
+    }
+
+    file.default.readText({
+      uri: 'internal://files/recovery.txt',
+      success: (result) => {
+        if (callback) callback(null, result.text);
+      },
+      fail: (data, code) => {
+        console.log(`读取恢复笔记文件失败: ${code}`, data);
+        if (callback) callback(new Error(`Failed to read recovery file: ${code}`));
+      }
+    });
+  }).catch(err => {
+    console.error('导入文件系统模块时出错:', err);
+    if (callback) callback(err);
+  });
+}
+
+// 清除恢复笔记文件
+export function clearRecoveryFile(callback) {
+  import('@system.file').then(file => {
+    if (!file || !file.default) {
+      console.error('无法导入文件系统模块');
+      if (callback) callback(new Error('Failed to import file system module'));
+      return;
+    }
+
+    file.default.writeText({
+      uri: 'internal://files/recovery.txt',
+      text: '',
+      success: () => {
+        console.log('恢复笔记文件 recovery.txt 清除成功');
+        if (callback) callback(null);
+      },
+      fail: (data, code) => {
+        console.error(`清除恢复笔记文件失败: ${code}`, data);
+        if (callback) callback(new Error(`Failed to clear recovery file: ${code}`));
+      }
+    });
+  }).catch(err => {
+    console.error('导入文件系统模块时出错:', err);
+    if (callback) callback(err);
+  });
+}
