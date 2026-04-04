@@ -215,7 +215,7 @@ export default {
 
         // 获取所有笔记（排除恢复笔记标记）
         const noteEntries = Object.entries(metadata.notes || {})
-          .filter(([noteId, noteData]) => !noteData.recovery) // 过滤掉旧的恢复标记
+          .filter(([noteData]) => !noteData.recovery) // 过滤掉旧的恢复标记
           .map(([noteId, noteData]) => ({
             id: noteId,
             createTime: noteData.createTime,
@@ -248,7 +248,6 @@ export default {
           }
 
           // 如果有恢复文件，添加到笔记列表开头
-          let recoveryNoteIndex = -1;
           if (hasRecovery) {
             const recoveryTimestamp = now; // 使用当前时间作为恢复笔记的时间
             loadedNotes.push({
@@ -259,7 +258,6 @@ export default {
               modifyTime: recoveryTimestamp,
               recovery: true
             });
-            recoveryNoteIndex = 0;
           }
 
           // 如果没有任何正常笔记，只有恢复文件
