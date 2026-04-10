@@ -1,15 +1,15 @@
 <template>
   <div class="page">
     <!-- 添加时间显示 -->
-    <div class="time-display">
-      <text class="time-text">{{currentTime}}</text>
+    <div class="height: 24px; justify-content: center; align-items: center; border-radius: 12px; margin: 5px; padding: 5px;">
+      <text class="font-size: 20px; font-weight: bold; color: #999999;">{{currentTime}}</text>
     </div>
-    <div class="header">
-      <text class="title">设置</text>
-      <div class="about-button" onclick="goToAbout"><image class="about-btn-icon" src="../Common/about.png"/></div>
+    <div style="height: 60px; padding-left: 20px; padding-right: 20px; border-bottom-width: 2px; border-bottom-color: #333333; align-items: center; justify-content: space-between;">
+      <text style="  font-size: 30px; color: #ffffff;">设置</text>
+      <div style="width: 50px; height: 50px; background-color: rgb(38,38,38); border-radius: 25px; margin-right: 3px; justify-content: center; align-items: center; border: 3px solid rgba(255,255,255,0.06); " onclick="goToAbout"><image style="height: 16px; width: 16px;" src="../Common/about.png"/></div>
     </div>
     
-  <list class="settings-list" bounces="true">
+  <list style="flex: 1; width: 100%; padding: 10px;" bounces="true">
       <list-item type="item" class="setting-item">
         <div class="setting-content">
           <text class="setting-label">振动反馈</text>
@@ -217,57 +217,6 @@ export default {
   width: 100%;
   height: 100%;
 }
-
-.time-display {
-  height: 24px;
-  justify-content: center;
-  align-items: center;
-  border-radius: 12px; /* 添加圆角 */
-  margin: 5px;
-  padding: 5px;
-}
-.time-text {
-  font-size: 20px;
-  font-weight: bold;
-  color: #999999;
-}
-
-.header {
-  height: 60px;
-  padding-left: 20px;
-  padding-right: 20px;
-  border-bottom-width: 2px;
-  border-bottom-color: #333333;
-  align-items: center;
-  justify-content: space-between;
-}
-
-.title {
-  font-size: 30px;
-  color: #ffffff;
-}
-
-.about-button {
-  width: 50px;
-  height: 50px;
-  background-color: rgb(38,38,38);
-  border-radius: 25px;
-  margin-right: 3px;
-  justify-content: center;
-  align-items: center;
-  border: 3px solid rgba(255,255,255,0.06); 
-}
-
-.about-btn-icon{
-  height: 16px;
-  width: 16px;
-}
-.settings-list {
-  flex: 1;
-  width: 100%;
-  padding: 10px;
-}
-
 .setting-item {
   width: 100%;
   background-color: #1f1f1f;
@@ -306,20 +255,5 @@ export default {
   border-radius: 12px;
   border: 3px solid rgba(255,255,255,0.06);
   text-align: center;
-}
-
-.done-item {
-  width: 100%;
-  height: 120px;
-}
-
-.done-button {
-  width: 100%;
-  height: 80px;
-  background-color: #262626;
-  color: #ffffff;
-  font-size: 32px;
-  border-radius: 12px;
-  border: 3px solid rgba(255,255,255,0.06);
 }
 </style>
