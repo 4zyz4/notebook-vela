@@ -107,11 +107,6 @@ export default {
     }
   },
 
-  // 返回手势
-  onBackPress() {
-    this.goBack()
-  },
-
   // 跳转到关于页面
   goToAbout() {
     router.push({
@@ -212,10 +207,6 @@ export default {
     this.saveCurrentSettings();
     this.$forceUpdate();
   },
-
-  goBack() {
-    router.back();
-  }
 }
 </script>
 
