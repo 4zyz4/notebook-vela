@@ -1,8 +1,8 @@
 <template>
   <div class="page">
     <!-- 添加时间显示 -->
-    <div class="height: 24px; justify-content: center; align-items: center; border-radius: 12px; margin: 5px; padding: 5px;">
-      <text class="font-size: 20px; font-weight: bold; color: #999999;">{{currentTime}}</text>
+    <div style="height: 24px; justify-content: center; align-items: center; border-radius: 12px; margin: 5px; padding: 5px;">
+      <text style="font-size: 20px; font-weight: bold; color: #999999;">{{currentTime}}</text>
     </div>
     <div style="height: 60px; padding-left: 20px; padding-right: 20px; border-bottom-width: 2px; border-bottom-color: #333333; align-items: center; justify-content: space-between;">
       <text style="  font-size: 30px; color: #ffffff;">设置</text>
