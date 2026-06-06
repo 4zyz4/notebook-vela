@@ -16,6 +16,10 @@
       </div>
     </div>
     
+    <div if="!{{isConnected}}" class="conn-banner">
+      <text class="conn-banner-text">已连接到手机</text>
+    </div>
+    
     <list class="note-list" id="noteList" bounces="true">
       <list-item type="note" class="note-item" for="{{(index, note) in notes}}" onclick="editNote(index)">
         <text class="note-text {{note.recovery ? 'recovery-note' : ''}}">{{getPreview(note)}}</text>
@@ -42,6 +46,9 @@
 <script>
 import router from '@system.router'
 import { getCachedSettings, addSettingsListener, removeSettingsListener, addNotesListener, removeNotesListener } from '../Common/utils.js'
+// 导入设备通信模块
+import interconnect from '@system.interconnect'
+import prompt from '@system.prompt'
 
 export default {
   private: {
@@ -54,7 +61,10 @@ export default {
     currentTime: '', // 添加当前时间变量
     lastSettingsLoad: 0, // 上次加载设置的时间
     settingsChangeHandler: null, // 设置变化监听器引用
-    notesChangeHandler: null // 笔记变化监听器引用
+    notesChangeHandler: null, // 笔记变化监听器引用
+    // 新增设备通信相关属性
+    connect: null, // 连接实例
+    isConnected: false // 连接状态
   },
 
   onInit() {
@@ -72,6 +82,9 @@ export default {
     addSettingsListener(this.settingsChangeHandler);
     // 添加笔记变化监听器
     addNotesListener(this.notesChangeHandler);
+    
+    // 初始化设备通信
+    this.initDeviceCommunication();
   },
 
   onShow() {
@@ -96,6 +109,319 @@ export default {
     }
     // 启动时间更新定时器
     this.updateTimeDisplay()
+  },
+  
+  // 初始化设备通信
+  initDeviceCommunication() {
+    // 获取连接实例
+    this.connect = interconnect.instance();
+    
+    // 注册连接状态回调
+    this.connect.onopen = (data) => {
+      console.log('连接已打开 isReconnected: ', data.isReconnected);
+      this.isConnected = true;
+      // 连接成功时提示一次
+      if (!data.isReconnected) {
+        prompt.showToast({
+          message: '已连接到手机',
+          duration: 2000
+        });
+      }
+      // 自动发送所有笔记的开头部分
+      this.sendNotesPreviews();
+    };
+
+    this.connect.onclose = (data) => {
+      console.log(`连接已关闭, reason = ${data.data}, code = ${data.code}`);
+      this.isConnected = false;
+    };
+
+    this.connect.onerror = (data) => {
+      console.log(`连接错误, errMsg = ${data.data}, errCode = ${data.code}`);
+      this.isConnected = false;
+    };
+
+    // 注册消息接收回调
+    this.connect.onmessage = (data) => {
+      console.log(`收到手机消息: ${JSON.stringify(data)}`);
+      this.isConnected = true;
+      try {
+        const message = JSON.parse(data.data);
+        this.handleReceivedMessage(message);
+      } catch (error) {
+        console.error('解析消息失败:', error);
+      }
+    };
+  },
+
+  // 处理收到的消息
+  handleReceivedMessage(message) {
+    const type = message.type || message.tag
+    console.log('处理消息类型:', type)
+    switch (type) {
+      case 'request_notes_preview':
+        console.log('收到请求笔记预览消息')
+        this.sendNotesPreviews()
+        break
+      case 'request_full_note':
+        this.sendFullNote(message.noteId)
+        break
+      case 'update_note':
+        this.updateNote(message.noteId, message.content)
+        break
+      case 'delete_note':
+        this.deleteNote(message.noteId)
+        break
+      case 'create_note':
+        this.createNote(message.content)
+        break
+      case '__hs__':
+        this.handleHandshake(message)
+        break
+      default:
+        console.log('未知消息类型:', type)
+    }
+  },
+
+  handleHandshake(message) {
+    const count = message.count
+    if (count < 2) {
+      this.connect.send({
+        data: {
+          tag: '__hs__',
+          count: count + 1
+        },
+        success: () => { console.log('握手消息发送成功') },
+        fail: (data, code) => { console.log(`发送握手消息失败, 错误信息 = ${data.data}, 错误码 = ${data.code}`) }
+      })
+    }
+  },
+
+  // 从存储读取所有笔记并发送预览
+  sendNotesPreviews() {
+    if (!this.connect) return
+    this.isConnected = true
+
+    import('../Common/utils.js').then(utils => {
+      utils.readMetadata((err, metadata) => {
+        if (err) {
+          console.error('读取元数据失败，无法发送预览:', err)
+          return
+        }
+
+        const noteIds = Object.keys(metadata.notes || {})
+        if (noteIds.length === 0) {
+          this.connect.send({
+            data: {
+              type: 'notes_preview',
+              previews: []
+            },
+            success: () => { console.log('笔记预览发送成功（空）') },
+            fail: (data, code) => { console.log(`发送笔记预览失败, 错误信息 = ${data.data}, 错误码 = ${data.code}`) }
+          })
+          return
+        }
+
+        let previews = []
+        let loadedCount = 0
+        const totalCount = noteIds.length
+
+        noteIds.forEach((noteId) => {
+          utils.readNoteFile(noteId, (err, content) => {
+            loadedCount++
+            const text = (!err && content) ? content : ''
+            const parts = text.split('|')[0] || ''
+            const preview = parts.length <= 32 ? parts : parts.substring(0, 32)
+
+            previews.push({
+              id: noteId,
+              preview: preview
+            })
+
+            if (loadedCount === totalCount) {
+              this.connect.send({
+                data: {
+                  type: 'notes_preview',
+                  previews: previews
+                },
+                success: () => { console.log('笔记预览发送成功') },
+                fail: (data, code) => { console.log(`发送笔记预览失败, 错误信息 = ${data.data}, 错误码 = ${data.code}`) }
+              })
+            }
+          })
+        })
+      })
+    })
+  },
+
+  // 从存储读取完整笔记并发送
+  sendFullNote(noteId) {
+    if (!this.connect) return
+    this.isConnected = true
+
+    import('../Common/utils.js').then(utils => {
+      utils.readNoteFile(noteId, (err, content) => {
+        if (err || !content) {
+          this.connect.send({
+            data: {
+              type: 'note_not_found',
+              noteId: noteId
+            },
+            success: () => { console.log('发送笔记不存在消息成功') },
+            fail: (data, code) => { console.log(`发送笔记不存在消息失败, 错误信息 = ${data.data}, 错误码 = ${data.code}`) }
+          })
+          return
+        }
+
+        this.connect.send({
+          data: {
+            type: 'full_note_response',
+            noteId: noteId,
+            content: content
+          },
+          success: () => { console.log('完整笔记发送成功') },
+          fail: (data, code) => { console.log(`发送完整笔记失败, 错误信息 = ${data.data}, 错误码 = ${data.code}`) }
+        })
+      })
+    })
+  },
+
+  // 更新笔记
+  updateNote(noteId, content) {
+    import('../Common/utils.js').then(utils => {
+      utils.saveNoteFile(noteId, content, (err) => {
+        if (err) {
+          console.error('更新笔记失败:', err)
+          this.connect.send({
+            data: {
+              type: 'update_error',
+              noteId: noteId,
+              error: err.message
+            },
+            success: () => { console.log('发送更新错误消息成功') },
+            fail: (data, code) => { console.log(`发送更新错误消息失败, 错误信息 = ${data.data}, 错误码 = ${data.code}`) }
+          })
+        } else {
+          console.log('笔记更新成功')
+          this.connect.send({
+            data: {
+              type: 'update_success',
+              noteId: noteId,
+              content: content
+            },
+            success: () => { console.log('发送更新成功消息成功') },
+            fail: (data, code) => { console.log(`发送更新成功消息失败, 错误信息 = ${data.data}, 错误码 = ${data.code}`) }
+          })
+          // 更新元数据中的修改时间
+          utils.readMetadata((err, metadata) => {
+            if (!err && metadata && metadata.notes && metadata.notes[noteId]) {
+              metadata.notes[noteId].modifyTime = Date.now()
+              utils.saveMetadata(metadata, () => {
+                this.loadNotes()
+              })
+            } else {
+              this.loadNotes()
+            }
+          })
+        }
+      })
+    })
+  },
+
+  // 删除笔记
+  deleteNote(noteId) {
+    import('../Common/utils.js').then(utils => {
+      utils.deleteNoteFile(noteId, (err) => {
+        if (err) {
+          console.error('删除笔记失败:', err)
+          this.connect.send({
+            data: {
+              type: 'delete_error',
+              noteId: noteId,
+              error: err.message
+            },
+            success: () => { console.log('发送删除错误消息成功') },
+            fail: (data, code) => { console.log(`发送删除错误消息失败, 错误信息 = ${data.data}, 错误码 = ${data.code}`) }
+          })
+        } else {
+          // 清理元数据
+          utils.readMetadata((err, metadata) => {
+            if (!err && metadata && metadata.notes) {
+              delete metadata.notes[noteId]
+              utils.saveMetadata(metadata, () => {
+                console.log('笔记删除成功')
+                this.connect.send({
+                  data: {
+                    type: 'delete_success',
+                    noteId: noteId
+                  },
+                  success: () => { console.log('发送删除成功消息成功') },
+                  fail: (data, code) => { console.log(`发送删除成功消息失败, 错误信息 = ${data.data}, 错误码 = ${data.code}`) }
+                })
+                this.loadNotes()
+              })
+            } else {
+              console.log('笔记删除成功')
+              this.connect.send({
+                data: {
+                  type: 'delete_success',
+                  noteId: noteId
+                },
+                success: () => { console.log('发送删除成功消息成功') },
+                fail: (data, code) => { console.log(`发送删除成功消息失败, 错误信息 = ${data.data}, 错误码 = ${data.code}`) }
+              })
+              this.loadNotes()
+            }
+          })
+        }
+      })
+    })
+  },
+
+  // 创建笔记
+  createNote(content) {
+    import('../Common/utils.js').then(utils => {
+      const noteId = Date.now().toString()
+      utils.saveNoteFile(noteId, content, (err) => {
+        if (err) {
+          console.error('创建笔记失败:', err)
+          this.connect.send({
+            data: {
+              type: 'create_error',
+              noteId: noteId,
+              error: err.message
+            },
+            success: () => { console.log('发送创建错误消息成功') },
+            fail: (data, code) => { console.log(`发送创建错误消息失败, 错误信息 = ${data.data}, 错误码 = ${data.code}`) }
+          })
+        } else {
+          console.log('笔记创建成功')
+          this.connect.send({
+            data: {
+              type: 'create_success',
+              noteId: noteId,
+              content: content
+            },
+            success: () => { console.log('发送创建成功消息成功') },
+            fail: (data, code) => { console.log(`发送创建成功消息失败, 错误信息 = ${data.data}, 错误码 = ${data.code}`) }
+          })
+          // 添加到元数据
+          utils.readMetadata((err, metadata) => {
+            const now = Date.now()
+            if (err || !metadata) {
+              metadata = { notes: {} }
+            }
+            metadata.notes[noteId] = {
+              createTime: now,
+              modifyTime: now
+            }
+            utils.saveMetadata(metadata, () => {
+              this.loadNotes()
+            })
+          })
+        }
+      })
+    })
   },
 
   // 清除恢复文件
@@ -588,4 +914,21 @@ export default {
   height: 50px;
   background-color: #000000;
 }
+
+.conn-banner {
+  width: 202px;
+  height: 36px;
+  background-color: #1f1f1f;
+  justify-content: center;
+  align-items: center;
+  margin-top: 5px;
+  margin-left: 5px;
+  border: 3px solid rgba(255,255,255,0.06);
+}
+
+.conn-banner-text {
+  font-size: 18px;
+  color: #ffffff;
+}
+
 </style>
