@@ -46,6 +46,9 @@
       },
       "about": {
         "component": "about"
+      },
+      "interconnect": {
+        "component": "interconnect"
       }
     }
   },

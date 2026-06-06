@@ -5,8 +5,15 @@
       <text style="font-size: 20px; font-weight: bold; color: #999999;">{{currentTime}}</text>
     </div>
     <div style="height: 60px; padding-left: 20px; padding-right: 20px; border-bottom-width: 2px; border-bottom-color: #333333; align-items: center; justify-content: space-between;">
-      <text style="  font-size: 30px; color: #ffffff;">设置</text>
-      <div style="width: 50px; height: 50px; background-color: rgb(38,38,38); border-radius: 25px; margin-right: 3px; justify-content: center; align-items: center; border: 3px solid rgba(255,255,255,0.06); " onclick="goToAbout"><image style="height: 16px; width: 16px;" src="../Common/about.png"/></div>
+      <text style="font-size: 30px; color: #ffffff;">设置</text>
+      <div style="flex-direction: row; align-items: center;">
+        <div style="width: 50px; height: 50px; background-color: rgb(38,38,38); border-radius: 25px; margin-right: 3px; justify-content: center; align-items: center; border: 3px solid rgba(255,255,255,0.06);" onclick="goToInterconnect">
+          <image style="height: 24px; width: 24px;" src="../Common/connect.png"/>
+        </div>
+        <div style="width: 50px; height: 50px; background-color: rgb(38,38,38); border-radius: 25px; margin-right: 3px; justify-content: center; align-items: center; border: 3px solid rgba(255,255,255,0.06);" onclick="goToAbout">
+          <image style="height: 16px; width: 16px;" src="../Common/about.png"/>
+        </div>
+      </div>
     </div>
     
   <list style="flex: 1; width: 100%; padding: 10px;" bounces="true">
@@ -111,6 +118,13 @@ export default {
   goToAbout() {
     router.push({
       uri: '/about'
+    });
+  },
+
+  // 跳转到设备互联页面
+  goToInterconnect() {
+    router.push({
+      uri: '/interconnect'
     });
   },
 
