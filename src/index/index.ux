@@ -16,7 +16,7 @@
       </div>
     </div>
     
-    <div if="!{{isConnected}}" class="conn-banner">
+    <div if="{{isConnected}}" class="conn-banner">
       <text class="conn-banner-text">已连接到手机</text>
     </div>
     
