@@ -94,6 +94,7 @@ export default {
 
     this.connect.onmessage = (data) => {
       console.log(`收到手机消息: ${JSON.stringify(data)}`)
+      this.isConnected = true
       try {
         const message = JSON.parse(data.data)
         this.handleReceivedMessage(message)
@@ -104,7 +105,8 @@ export default {
   },
 
   sendNotesPreviews() {
-    if (!this.isConnected || !this.connect) return
+    if (!this.connect) return
+    this.isConnected = true
 
     import('../Common/utils.js').then(utils => {
       utils.readMetadata((err, metadata) => {
@@ -159,7 +161,8 @@ export default {
   },
 
   handleReceivedMessage(message) {
-    switch (message.type) {
+    const type = message.type || message.tag
+    switch (type) {
       case 'request_notes_preview':
         this.sendNotesPreviews()
         break
@@ -175,13 +178,17 @@ export default {
       case 'create_note':
         this.createNote(message.content)
         break
+      case '__hs__':
+        this.handleHandshake(message)
+        break
       default:
-        console.log('未知消息类型:', message.type)
+        console.log('未知消息类型:', type)
     }
   },
 
   sendFullNote(noteId) {
-    if (!this.isConnected || !this.connect) return
+    if (!this.connect) return
+    this.isConnected = true
 
     import('../Common/utils.js').then(utils => {
       utils.readNoteFile(noteId, (err, content) => {
@@ -229,7 +236,8 @@ export default {
           this.connect.send({
             data: {
               type: 'update_success',
-              noteId: noteId
+              noteId: noteId,
+              content: content
             },
             success: () => { console.log('发送更新成功消息成功') },
             fail: (data, code) => { console.log(`发送更新成功消息失败, 错误信息 = ${data.data}, 错误码 = ${data.code}`) }
@@ -261,6 +269,13 @@ export default {
             fail: (data, code) => { console.log(`发送删除错误消息失败, 错误信息 = ${data.data}, 错误码 = ${data.code}`) }
           })
         } else {
+          // 删除文件成功后，同时清理元数据
+          utils.readMetadata((err, metadata) => {
+            if (!err && metadata && metadata.notes) {
+              delete metadata.notes[noteId]
+              utils.saveMetadata(metadata, () => {})
+            }
+          })
           console.log('笔记删除成功')
           this.connect.send({
             data: {
@@ -295,7 +310,8 @@ export default {
           this.connect.send({
             data: {
               type: 'create_success',
-              noteId: noteId
+              noteId: noteId,
+              content: content
             },
             success: () => { console.log('发送创建成功消息成功') },
             fail: (data, code) => { console.log(`发送创建成功消息失败, 错误信息 = ${data.data}, 错误码 = ${data.code}`) }
@@ -315,6 +331,20 @@ export default {
         }
       })
     })
+  },
+
+  handleHandshake(message) {
+    const count = message.count
+    if (count < 2) {
+      this.connect.send({
+        data: {
+          tag: '__hs__',
+          count: count + 1
+        },
+        success: () => { console.log('握手消息发送成功') },
+        fail: (data, code) => { console.log(`发送握手消息失败, 错误信息 = ${data.data}, 错误码 = ${data.code}`) }
+      })
+    }
   },
 
   updateCurrentTime() {
