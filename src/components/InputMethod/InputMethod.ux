@@ -51,6 +51,7 @@
               <div static style="margin-left: 64px;margin-top: -5px;height: 60px;">
                 <text class="calbtn66" for="{{item in keys['full'][2]}}" @click="onSelect(item)">{{item}}</text>
                 <img static src="./assets/arc/space.png" style="width: 60px;height: 60px;" @click="onBtnClick('space')" />
+                <img static src="./assets/arc/enter.png" style="width: 60px;height: 60px;margin-left:3px;" @click="onBtnClick('enter')" />
               </div>
             </div>
             <div if="{{numFlag && !numFlag_jp}}" style="left: 3px; flex-direction: column;">
@@ -360,6 +361,9 @@ export default {
         break;
       case "space":
         this.addAllTxt(" ");
+        break;
+      case "enter":
+        this.addAllTxt("\n");
         break;
       case "down":
         this.downFlag = this.downFlag === "down" ? "" : "down";
