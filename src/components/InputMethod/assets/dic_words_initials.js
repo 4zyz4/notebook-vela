@@ -812,4 +812,8 @@ function getInitialsIndex() {
   return _initialsIndex;
 }
 
-export { getInitialsIndex }
+function releaseInitialsIndex() {
+  _initialsIndex = null;
+}
+
+export { getInitialsIndex, releaseInitialsIndex }

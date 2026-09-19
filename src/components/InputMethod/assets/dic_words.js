@@ -1177,4 +1177,8 @@ function getWords() {
   return _words;
 }
 
-export { getWords };
+function releaseWords() {
+  _words = null;
+}
+
+export { getWords, releaseWords };

@@ -16,7 +16,7 @@
       </div>
       <block if="{{!schemaPickerVisible}}">
       <!-- 拼音小字行：键盘上方 28px 提示带，透明背景，允许与正文重叠显示 -->
-      <div class="cvalrow-wrap" show="{{(lang==='cn' || lang==='jp') && downFlag==='' && !numFlag && cval}}">
+      <div class="cvalrow-wrap" show="{{lang==='cn' && downFlag==='' && !numFlag && cval}}">
         <text class="cvalrow">{{cvalDisplay}}</text>
       </div>
       <!-- 胶囊屏 -->
@@ -55,7 +55,7 @@
                 <img static src="./assets/arc/enter.png" style="width: 60px;height: 60px;margin-left:3px;" @click="onBtnClick('enter')" />
               </div>
             </div>
-            <div if="{{numFlag && !numFlag_jp}}" style="left: 3px; flex-direction: column;">
+            <div if="{{numFlag}}" style="left: 3px; flex-direction: column;">
               <div static style="margin-left: 0px;margin-top: 0px;height: 60px;">
                 <text class="calbtn66" for="{{item in keys['sign'][0]}}" @click="onSelect(item)">{{item}}</text>
               </div>
@@ -64,17 +64,6 @@
               </div>
               <div static style="margin-left: 64px;margin-top: -5px;height: 60px;">
                 <text class="calbtn66" for="{{item in keys['sign'][2]}}" @click="onSelect(item)">{{item}}</text>
-              </div>
-            </div>
-            <div if="{{numFlag_jp}}" style="left: 3px; flex-direction: column;">
-              <div static style="margin-left: 0px;margin-top: 0px;height: 60px;">
-                <text class="calbtn66" for="{{item in keys['sign_jp'][0]}}" @click="onSelect(item)">{{item}}</text>
-              </div>
-              <div static style="margin-left: 32px;margin-top: -5px;height: 60px;">
-                <text class="calbtn66" for="{{item in keys['sign_jp'][1]}}" @click="onSelect(item)">{{item}}</text>
-              </div>
-              <div static style="margin-left: 64px;margin-top: -5px;height: 60px;">
-                <text class="calbtn66" for="{{item in keys['sign_jp'][2]}}" @click="onSelect(item)">{{item}}</text>
               </div>
             </div>
           </scroll>
@@ -89,10 +78,9 @@
           </scroll>
           <img show="{{resultRow0.length > 0}}" style="position: absolute;left: 120px;top: 57px;width: 60px;height: 40px;" src="./assets/arc/down2.png" @click="onBtnClick('down')" />
           <!-- 带变量的相对路径在 aiot-tookit 2.0.4 中修复 -->
-          <img src="./assets/arc/{{lang}}.png" style="position: absolute;top:0px;left:9px;width: 48px;height: 42px;" @click="onLangClick" @longpress="onLangLongPress" show="{{downFlag==='' && !numFlag && !numFlag_jp}}" />
-          <img src="./assets/arc/back2.png" style="position: absolute;top:0px;left:9px;width: 48px;height: 42px;" @click="onBtnClick('switchCn')" show="{{numFlag && lang==='cn' ||numFlag_jp && lang==='jp' }}" />
+          <img src="./assets/arc/{{lang}}.png" style="position: absolute;top:0px;left:9px;width: 48px;height: 42px;" @click="onLangClick" @longpress="onLangLongPress" show="{{downFlag==='' && !numFlag}}" />
+          <img src="./assets/arc/back2.png" style="position: absolute;top:0px;left:9px;width: 48px;height: 42px;" @click="onBtnClick('switchCn')" show="{{numFlag}}" />
           <img src="./assets/arc/123.png" style="position: absolute;left: 70px;top: 0px;width: 52px;height: 42px;" @click="onBtnClick('switchNum')" show="{{downFlag==='' && !numFlag && lang==='cn'}}" />
-          <img src="./assets/arc/123.png" style="position: absolute;left: 70px;top: 0px;width: 52px;height: 42px;" @click="onBtnClick('switchNum_jp')" show="{{downFlag==='' && !numFlag_jp && lang==='jp'}}" />
           <img src="./assets/arc/bigA.png" style="position: absolute;top:0px;left:72px;width:48px;height:42px;" @click="onBtnClick('switchLow')" show="{{downFlag==='' && upperFlag && lang==='en' }}" />
           <img src="./assets/arc/a.png" style="position: absolute;top:0px;left:72px;width:48px;height:42px;" @click="onBtnClick('switchUpper')" show="{{downFlag==='' && !upperFlag && lang==='en' }}" />
           <img src="./assets/arc/del.png" style="position: absolute;left: 135px;top: 0px;width: 48px;height: 42px;" @click="onBtnClick('D')" />
@@ -193,7 +181,6 @@ export default {
     downFlag: "",
     lang: "cn",
     numFlag: false,
-    numFlag_jp: false,
     upperFlag: false,
     currentSchema: 'full',
     schemaPickerVisible: false,
@@ -216,11 +203,6 @@ export default {
         ["~", "!", "@", "#", "%", "“", "”", "*", "?", "/"],
         ["(", ")", "-", "_", ":", ";", "，", "。", "."],
       ],
-      sign_jp: [
-        ["1", "2", "3", "4", "5", "6", "7", "8", "9", "0"],
-        ["~", "•", "@", "#", "%", "「", "」", "*", "?", "/"],
-        ["(", ")", "-", "…", ":", ";", "、", "。", "!"],
-      ],
       t9: [
         ["abc", "def"],
         ["ghi", "jkl", "mno"],
@@ -240,7 +222,6 @@ export default {
       this._ensureDictInit();
     }
     this.$watch("hide", "watchHidePropsChange");
-    this.$watch("keyboardtype", "watchKeyboardTypePropsChange");
   },
   replaceActiveSchema(option) {
     this.__activeSchemaIndex = option.schema
@@ -336,17 +317,7 @@ export default {
         this.clearComposition()
         break;
       case "lang":
-        if (this.keyboardtype === "T9") {
-          this.lang = this.lang === "cn" ? "en" : "cn";
-        } else {
-          if (this.lang === "cn") {
-            this.lang = "en";
-          } else if (this.lang === "en") {
-            this.lang = "jp";
-          } else {
-            this.lang = "cn";
-          }
-        }
+        this.lang = this.lang === "cn" ? "en" : "cn";
         this.clearComposition()
         break;
       case "D":
@@ -371,7 +342,7 @@ export default {
         break;
       case "select":
         if (this.lastWaitingStr != sign && this.lastWaitingStr) {
-          if (this.lang === "cn" || this.lang === 'jp') {
+          if (this.lang === "cn") {
             this.cval += this.waitingList[this.waitingIndex];
           } else {
             if (this.upperFlag) {
@@ -386,17 +357,10 @@ export default {
         break;
       case "switchNum":
         this.numFlag = true;
-        this.numFlag_jp = false;
-        this.clearComposition()
-        break;
-      case "switchNum_jp":
-        this.numFlag = true;
-        this.numFlag_jp = true;
         this.clearComposition()
         break;
       case "switchCn":
         this.numFlag = false;
-        this.numFlag_jp = false;
         break;
       case "switchUpper":
         this.upperFlag = true;
@@ -415,7 +379,7 @@ export default {
                 this.waitingIndex = 0;
               }
             } else {
-              if (this.lang === "cn" || this.lang === 'jp') {
+              if (this.lang === "cn") {
                 this.cval += this.waitingList[this.waitingIndex];
               } else {
                 if (this.upperFlag) {
@@ -460,7 +424,7 @@ export default {
         ? SimpleInputMethod.getSegmentedDisplay(effectiveCode)
         : effectiveCode
     }
-    if (!effectiveCode || (this.lang !== "cn" && this.lang !== "jp")) {
+    if (!effectiveCode || this.lang !== "cn") {
       this.resultList = [];
       this.resultWordList = [];
       this.matchedLen = 0
@@ -549,7 +513,7 @@ export default {
       return;
     }
     this.onVibrate()
-    if ((this.lang === 'cn' || this.lang === 'jp')  && !this.numFlag) {
+    if (this.lang === 'cn' && !this.numFlag) {
       this.cval += num.toLowerCase();
     } else if (this.lang === "en" && !this.numFlag) {
       if (this.upperFlag) {
@@ -583,21 +547,20 @@ export default {
     if (newV === false) {
       this.keyboardCreated = true;
       this._ensureDictInit();
+    } else {
+      // 键盘隐藏：释放整词库与其派生索引，降低常驻内存（单字表保留）
+      SimpleInputMethod.releaseWords();
     }
+  },
+  // 组件销毁：释放词库，避免模块级缓存常驻导致泄漏
+  onDestroy() {
+    SimpleInputMethod.releaseWords();
   },
   // 字典懒初始化入口（幂等，只跑一次）。initDict 内部还有 syllableSet 幂等守卫。
   _ensureDictInit() {
     if (this.__dictInitStarted) return
     this.__dictInitStarted = true
     SimpleInputMethod.initDict()
-  },
-  watchKeyboardTypePropsChange(newV) {
-    if (newV === "T9" && this.lang === "jp") {
-      this.lang = "cn";
-      this.cval = "";
-      this.clearWaiting();
-      this.resetResultList();
-    }
   },
   onVibrate() {
     if (this.vibratemode !== '') {

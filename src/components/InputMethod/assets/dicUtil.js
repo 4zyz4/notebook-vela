@@ -1,7 +1,6 @@
 import { getDict } from './dic.js'
-import { getDictJp } from './dic_jp.js'
-import { getWords } from './dic_words.js'
-import { getInitialsIndex } from './dic_words_initials.js'
+import { getWords, releaseWords } from './dic_words.js'
+import { getInitialsIndex, releaseInitialsIndex } from './dic_words_initials.js'
 import { syllables } from './pinyin_syllables.js'
 
 const excludedShuangpinSyllables = new Set(['n', 'm', 'ng', 'hm', 'hng'])
@@ -126,12 +125,11 @@ SimpleInputMethod.getShuangpinHanzi = function(rawCode, index) {
 SimpleInputMethod.initDict = function() {
   // 幂等：已初始化则跳过（组件可能多次挂载）
   if (this.dict.syllableSet) return
-  // 惰性取字典对象（模块只导出工厂函数，页面加载时不建对象；首次 initDict 时才创建，
-  // 把建 3000 词/大表对象的成本从页面入口挪到键盘弹出后的后台——search/chat 秒开的关键之一）
+  // 只常驻「单字表」：每次按键都要查 py2hz/py2hz2，故 initDict 构建。
+  // 惰性取字典对象（模块只导出工厂函数，页面加载时不建对象）。
   this.dict.py2hz = getDict()
   this.dict.py2hz2 = {}
   this.dict.py2hz2['i'] = 'i' // 特殊处理
-  this.dict.romaji2kanji = getDictJp()
 
   // 合法音节集合 + 首字母索引：一次遍历 dic.js
   this.dict.syllableSet = new Set(syllables)
@@ -140,26 +138,47 @@ SimpleInputMethod.initDict = function() {
     if (!this.dict.py2hz2[ch]) this.dict.py2hz2[ch] = this.dict.py2hz[key]
     this.dict.syllableSet.add(key)
   }
+  // 整词词库（words / initialsIndex / forwardIndex）不在此构建：
+  // 改由首次多音节查询时 _ensureWords 惰性构建，键盘隐藏时 releaseWords 释放，降低常驻内存。
+}
 
-  // 整词词库（惰性创建）
+// 多音节词库惰性构建（幂等）。仅在需要整词/简拼/分词组合时调用。
+// 构建后驻留，键盘隐藏时由 releaseWords 释放，避免长时间占用内存导致 OOM。
+SimpleInputMethod._ensureWords = function() {
+  if (this.dict.words) return
   this.dict.words = getWords()
-
   // 简拼索引：预计算倒排索引直接赋值（生成脚本产出，init 不再逐词切分）
   this.dict.initialsIndex = getInitialsIndex()
-  // forwardIndex 分片构建：每片 200 词，剩余排 setTimeout(0) 继续。
-  // 一次性遍历 3000 词是长任务，会占住主线程可感卡顿；分片后首片立即返回，后续零碎完成。
+  // forwardIndex 分片构建（见 _buildForwardIndex）
   this._buildForwardIndex()
+}
+
+// 释放多音节词库及其派生索引并触发 GC。单字表常驻，不受影响。
+SimpleInputMethod.releaseWords = function() {
+  // 作废未完成的 forwardIndex 分片定时器，避免其向已释放的 fwd 继续写入
+  this._fwdToken = (this._fwdToken || 0) + 1
+  this.dict.words = null
+  this.dict.initialsIndex = null
+  this.dict.forwardIndex = null
+  releaseWords()
+  releaseInitialsIndex()
+  if (typeof global !== 'undefined' && global && typeof global.runGC === 'function') {
+    global.runGC()
+  }
 }
 
 // 前向索引(首2字母 → 词键列表)分片构建。构建完成前 getMultiHanzi 的 forward 匹配短暂空转，
 // 前缀/简拼/分词逐字兜底路径不受影响（getHanzi 返回空也由调用方降级），用户无感。
 SimpleInputMethod._buildForwardIndex = function() {
   const wmap = this.dict.words || {}
-  const fwd = this.dict.forwardIndex || (this.dict.forwardIndex = {})
+  const fwd = this.dict.forwardIndex = {}
   const keys = Object.keys(wmap)
+  const token = this._fwdToken = (this._fwdToken || 0) + 1
   const CHUNK = 200
   let i = 0
   const step = () => {
+    // 词库已释放或已被新一轮构建取代则中止
+    if (this._fwdToken !== token || this.dict.forwardIndex !== fwd) return
     const end = Math.min(i + CHUNK, keys.length)
     for (; i < end; i++) {
       const key = keys[i]
@@ -176,18 +195,11 @@ SimpleInputMethod._buildForwardIndex = function() {
 }
 
 SimpleInputMethod.getSingleHanzi = function(pinyin, lang = 'cn') {
-  // 根据 lang 决定走哪张表
-  if (lang === 'cn') {
-    return this.dict.py2hz2[pinyin]
-    || this.dict.py2hz[pinyin]
-    || ''
-  }
-  else if (lang === 'jp') {
-    return this.dict.romaji2kanji[pinyin]
-    || ''
-  }
-  // en 模式不查候选
-  return ''
+  // 仅中文查询候选，en 模式不查候选
+  if (lang !== 'cn') return ''
+  return this.dict.py2hz2[pinyin]
+  || this.dict.py2hz[pinyin]
+  || ''
 }
 
 // 取音节首字：单字表 py2hz 优先，词库单音节兜底。
@@ -382,7 +394,9 @@ SimpleInputMethod.getSegmentedDisplay = function(pinyin) {
 SimpleInputMethod.getMultiHanzi = function(pinyin, lang = 'cn') {
   const empty = { words: [], composed: '', segs: null }
   if (lang !== 'cn') return empty
-  if (!this.dict.syllableSet || !this.dict.words) return empty
+  if (!this.dict.syllableSet) return empty
+  // 词库惰性构建：首次多音节查询时才加载整词/简拼/前向索引
+  this._ensureWords()
 
   const wmap = this.dict.words || {}
   const wordHits = []
