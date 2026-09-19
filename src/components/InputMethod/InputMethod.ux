@@ -1,114 +1,207 @@
 <template>
-  <div class="page" style="flex-direction: column;" show="{{!hide}}">
-    <div style="background-color:black" >
+  <div class="page" style="flex-direction: column; height: {{hide ? '0px' : 'auto'}}; overflow: {{hide ? 'hidden' : 'visible'}};">
+    <!-- 键盘内容懒建：外 if 保证键盘隐藏时整个子树不进 VDOM，首次弹出才创建，
+         之后 keyboardCreated 保活、hide 切换只走内层 show 显隐，不重复重建。 -->
+    <div if="{{!hide || keyboardCreated}}">
+      <div show="{{!hide}}" style="flex-direction: column;" >
+      <div if="{{schemaPickerVisible}}" class="schema-picker-panel" style="height: 305px;">
+        <img src="./assets/arc/cn.png" style="position:absolute;top:0px;left:{{(screenWidth - 192)/2 + 9}}px;width:48px;height:42px;" @click="onSchemaPickerCancel" />
+        <picker
+          class="schema-picker"
+          type="text"
+          range="{{schemaNames}}"
+          selected="{{schemaSelected}}"
+          @change="onSchemaPickerChange">
+        </picker>
+      </div>
+      <block if="{{!schemaPickerVisible}}">
+      <!-- 拼音小字行：键盘上方 28px 提示带，透明背景，允许与正文重叠显示 -->
+      <div class="cvalrow-wrap" show="{{(lang==='cn' || lang==='jp') && downFlag==='' && !numFlag && cval}}">
+        <text class="cvalrow">{{cvalDisplay}}</text>
+      </div>
       <!-- 胶囊屏 -->
-      <div style="width: 100%;height: 305px">
+      <div style="width: 100%;height: 305px;background-color:black;">
         <div static style="position:absolute;left:0px;top:34px;width:100%;height:276px;">
-          <progress percent="100" type="arc" style="start-angle:204deg;total-angle:-48deg;width:188px;height:188px;top:83px;left:2px;position:absolute;color:rgb(33,34,33);stroke-width:9px;layer-color:rgb(33,34,33);margin-left: 10px;"></progress>
-          <progress percent="{{30+percent}}" type="arc" style="start-angle:204deg;total-angle:-48deg;width:188px;height:188px;top:82px;left:2px;position:absolute;color:#ffffff;stroke-width:7px;layer-color:rgba(0,0,0,0);margin-left: 10px;"></progress>
-          <progress percent="{{1+percent}}" type="arc" style="start-angle:204deg;total-angle:-48deg;width:188px;height:188px;top:83px;left:2px;position:absolute;color:rgb(33,34,33);stroke-width:9px;layer-color:rgba(0,0,0,0);margin-left: 10px;"></progress>
-          <scroll id="keyboard" scroll-x="{{true}}" onscroll="handelScroll" >
-            <div if="{{!numFlag}}" style="left: 3px; flex-direction: column;">
-              <div static style="margin-left: 0px;margin-top: 0px;height: 60px;">
-                <text class="calbtn" for="{{item in keys['full'][0]}}" @click="onSelect(item)">{{item}}</text>
+          <progress percent="{{30+percent66}}" type="arc" style="start-angle:204deg;total-angle:-48deg;width:188px;height:188px;top:82px;left:2px;position:absolute;color:#ffffff;stroke-width:6px;layer-color:#262626;margin-left: {{(screenWidth - 192)/2}}px;"></progress>
+          <scroll id="keyboard66" scroll-x="{{true}}" onscroll="handelScroll" style="padding-left: {{(screenWidth - 192)/2}}px;padding-right: {{(screenWidth - 192)/2}}px;">
+            <div if="{{keyboardtype==='T9' && !numFlag}}" class="keyboard-pill-t9">
+              <div class="keyboard-row-pill-t9">
+                <text class="calbtnt9-pill" @click="onSelect('select')">
+                  选择
+                  <span if="{{waitingList.length !== 0}}" class="waiting-keys" style="color:#0d84ff;" @click="onSelectWaiting(waitingIndex)">
+                    {{waitingList[waitingIndex].toUpperCase()}}
+                  </span>
+                </text>
+                <text class="calbtnt9-pill" for="{{item in keys['t9'][0]}}" @click="onSelect(item)">{{item.toUpperCase()}}</text>
               </div>
-              <div static style="margin-left: 32px;margin-top: -5px;height: 60px;">
-                <text class="calbtn" for="{{item in keys['full'][1]}}" @click="onSelect(item)">{{item}}</text>
-                <div class="calbtn" style="background-color: #000000; border-color: #000000"></div> <!--占位符-->
+              <div class="keyboard-row-pill-t9">
+                <text class="calbtnt9-pill" for="{{item in keys['t9'][1]}}" @click="onSelect(item)">{{item.toUpperCase()}}</text>
               </div>
-              <div static style="margin-left: 64px;margin-top: -5px;height: 60px;">
-                <text class="calbtn" for="{{item in keys['full'][2]}}" @click="onSelect(item)">{{item}}</text>
-                <img static src="./assets/space.png" style="width: 60px;height: 60px;" @click="onBtnClick('space')" />
-                <img static src="./assets/enter.png" style="width: 60px;height: 60px;margin-left: 3px" @click="onBtnClick('enter')" />
-
+              <div class="keyboard-row-pill-t9">
+                <text class="calbtnt9-pill" for="{{item in keys['t9'][2]}}" @click="onSelect(item)">{{item.toUpperCase()}}</text>
               </div>
             </div>
-            <div else style="left: 3px; flex-direction: column;">
+            <div if="{{keyboardtype!=='T9' && !numFlag}}" style="left: 3px; flex-direction: column;">
               <div static style="margin-left: 0px;margin-top: 0px;height: 60px;">
-                <text class="calbtn" for="{{item in keys['sign'][0]}}" @click="onSelect(item)">{{item}}</text>
+                <text class="calbtn66" for="{{item in keys['full'][0]}}" @click="onSelect(item)">{{item}}</text>
               </div>
               <div static style="margin-left: 32px;margin-top: -5px;height: 60px;">
-                <text class="calbtn" for="{{item in keys['sign'][1]}}" @click="onSelect(item)">{{item}}</text>
+                <text class="calbtn66" for="{{item in keys['full'][1]}}" @click="onSelect(item)">{{item}}</text>
               </div>
               <div static style="margin-left: 64px;margin-top: -5px;height: 60px;">
-                <text class="calbtn" for="{{item in keys['sign'][2]}}" @click="onSelect(item)">{{item}}</text>
+                <text class="calbtn66" for="{{item in keys['full'][2]}}" @click="onSelect(item)">{{item}}</text>
+                <img static src="./assets/arc/space.png" style="width: 60px;height: 60px;" @click="onBtnClick('space')" />
+              </div>
+            </div>
+            <div if="{{numFlag && !numFlag_jp}}" style="left: 3px; flex-direction: column;">
+              <div static style="margin-left: 0px;margin-top: 0px;height: 60px;">
+                <text class="calbtn66" for="{{item in keys['sign'][0]}}" @click="onSelect(item)">{{item}}</text>
+              </div>
+              <div static style="margin-left: 32px;margin-top: -5px;height: 60px;">
+                <text class="calbtn66" for="{{item in keys['sign'][1]}}" @click="onSelect(item)">{{item}}</text>
+              </div>
+              <div static style="margin-left: 64px;margin-top: -5px;height: 60px;">
+                <text class="calbtn66" for="{{item in keys['sign'][2]}}" @click="onSelect(item)">{{item}}</text>
+              </div>
+            </div>
+            <div if="{{numFlag_jp}}" style="left: 3px; flex-direction: column;">
+              <div static style="margin-left: 0px;margin-top: 0px;height: 60px;">
+                <text class="calbtn66" for="{{item in keys['sign_jp'][0]}}" @click="onSelect(item)">{{item}}</text>
+              </div>
+              <div static style="margin-left: 32px;margin-top: -5px;height: 60px;">
+                <text class="calbtn66" for="{{item in keys['sign_jp'][1]}}" @click="onSelect(item)">{{item}}</text>
+              </div>
+              <div static style="margin-left: 64px;margin-top: -5px;height: 60px;">
+                <text class="calbtn66" for="{{item in keys['sign_jp'][2]}}" @click="onSelect(item)">{{item}}</text>
               </div>
             </div>
           </scroll>
         </div>
-        <div static style="position: absolute;left: {{(screenWidth - 212)/2}}px;top: 0px;width: 212px;height: 110px;"> 
-          <div static style="position: absolute;left: 3px;top: 47px;width: 206px;height: 60px; border:3px solid rgba(255,255,255,0.06); background-color:rgb(38,38,38); border-radius:30px"></div>
-          <scroll id="cvalWaiting" scroll-x="{{true}}" style="position: absolute;left: 15px;top: 56px;width: 164px;height: 42px;">
+        <div static style="position: absolute;left: {{(screenWidth - 192)/2}}px;top: 0px;width: 192px;height: 110px;">
+          <img static style="position: absolute;left: 3px;top: 47px;width: 186px;height: 60px;" src="./assets/arc/search.png" />
+          <!-- 候选横滚行：整词在前、单字随后（拼音已在键盘上方独立小字行显示，这里不放 cval） -->
+          <scroll id="cvalWaiting" scroll-x="{{true}}" style="position: absolute;left: 15px;top: 56px;width: 144px;height: 42px;">
             <div style="position: absolute;left: 0px;top: 0px;height: 42px;padding-right:20px">
-              <text class="calbtn02" style="padding-right:10px" @click="pushCval">{{cval}}</text>
-              <text for="{{cvalList}}" show="{{resultList.length > $idx}}" class="calbtn02" style="padding-right:10px" @click="onRsSelect(resultList[$idx])">{{resultList[$idx]}}</text>
+              <text for="{{resultRow0}}" show="{{resultRow0.length > $idx}}" class="calbtn02" style="padding-right:10px" @click="onRsSelect(resultRow0[$idx])">{{resultRow0[$idx]}}</text>
             </div>
           </scroll>
-          <img show="{{resultList.length > 0}}" style="position: absolute;left: 140px;top: 57px;width: 60px;height: 40px;" src="./assets/down2.png" @click="onBtnClick('down')" />
-          <img src="./assets/{{lang}}.png" style="position: absolute;top:0px;left:9px;width: 48px;height: 42px;" @click="onBtnClick('lang')" show="{{downFlag==='' && !numFlag}}" />
-          <img src="./assets/back2.png" style="position: absolute;top:0px;left:9px;width: 48px;height: 42px;" @click="onBtnClick('switchCn')" show="{{numFlag && lang==='cn'}}" />
-          <img src="./assets/123.png" style="position: absolute;top:0px;left:80px;width: 48px;height: 42px;" @click="onBtnClick('switchNum')" show="{{downFlag==='' && !numFlag && lang==='cn'}}" />
-          <img src="./assets/bigA.png" style="position: absolute;top:0px;left:80px;width: 48px;height:42px;" @click="onBtnClick('switchLow')" show="{{downFlag==='' && upperFlag && lang==='en'}}" />
-          <img src="./assets/a.png" style="position: absolute;top:0px;left:80px;width: 48px;height:42px;" @click="onBtnClick('switchUpper')" show="{{downFlag==='' && !upperFlag && lang==='en'}}" />
-          <img src="./assets/del.png" style="position: absolute;top:0px;left:155px;width: 48px;height: 42px;" @click="onBtnClick('D')" />
+          <img show="{{resultRow0.length > 0}}" style="position: absolute;left: 120px;top: 57px;width: 60px;height: 40px;" src="./assets/arc/down2.png" @click="onBtnClick('down')" />
+          <!-- 带变量的相对路径在 aiot-tookit 2.0.4 中修复 -->
+          <img src="./assets/arc/{{lang}}.png" style="position: absolute;top:0px;left:9px;width: 48px;height: 42px;" @click="onLangClick" @longpress="onLangLongPress" show="{{downFlag==='' && !numFlag && !numFlag_jp}}" />
+          <img src="./assets/arc/back2.png" style="position: absolute;top:0px;left:9px;width: 48px;height: 42px;" @click="onBtnClick('switchCn')" show="{{numFlag && lang==='cn' ||numFlag_jp && lang==='jp' }}" />
+          <img src="./assets/arc/123.png" style="position: absolute;left: 70px;top: 0px;width: 52px;height: 42px;" @click="onBtnClick('switchNum')" show="{{downFlag==='' && !numFlag && lang==='cn'}}" />
+          <img src="./assets/arc/123.png" style="position: absolute;left: 70px;top: 0px;width: 52px;height: 42px;" @click="onBtnClick('switchNum_jp')" show="{{downFlag==='' && !numFlag_jp && lang==='jp'}}" />
+          <img src="./assets/arc/bigA.png" style="position: absolute;top:0px;left:72px;width:48px;height:42px;" @click="onBtnClick('switchLow')" show="{{downFlag==='' && upperFlag && lang==='en' }}" />
+          <img src="./assets/arc/a.png" style="position: absolute;top:0px;left:72px;width:48px;height:42px;" @click="onBtnClick('switchUpper')" show="{{downFlag==='' && !upperFlag && lang==='en' }}" />
+          <img src="./assets/arc/del.png" style="position: absolute;left: 135px;top: 0px;width: 48px;height: 42px;" @click="onBtnClick('D')" />
         </div>
         <!-- 这里使用show会导致每次输入都会加载全部候选列表，很卡 -->
         <div style="position: absolute;top: 47px;width: 100%;height: 263px;background-color: black;" if="{{downFlag==='down'}}">
-          <div style="position: absolute;left: {{(screenWidth - 212)/2}}px;width: 212px;height: 263px;"> 
-            <list static class="list">
-              <list-item type="waitingRows" class="item" for="{{itemArray in resultList2}}">
-                <div class="item column center" for="{{item in itemArray}}">
-                  <input class="calbtn0" type="button" value="{{item}}" @click="onRsSelect(item)" />
+          <div style="position: absolute;left: {{(screenWidth - 192)/2}}px;width: 192px;height: 263px;">
+            <list static class="list66">
+              <list-item type="waitingRows66" class="item66" for="{{itemArray in resultList2}}">
+                <div class="candidate-matrix-cell column center" for="{{item in itemArray}}">
+                  <text class="calbtn-down-text" @click="onRsSelect(item)">{{item}}</text>
                 </div>
               </list-item>
             </list>
-            <img static style="position: absolute;top:196px;left:66px;width: 80px;height: 60px;" src="./assets/up2.png" @click="onBtnClick('down')" />
+            <img static style="position: absolute;top:196px;left:56px;width: 80px;height: 60px;" src="./assets/arc/up2.png" @click="onBtnClick('down')" />
           </div>
         </div>
+      </div>
+      </block>
       </div>
     </div>
   </div>
 </template>
 
 <script>
-import vibrator from "@system.vibrator";
-import { SimpleInputMethod } from "./assets/dicUtil.js";
-function doSearchDic(word, cb) {
-  let hanzi = SimpleInputMethod.getHanzi(word);
-  if (hanzi && hanzi[0]) {
-    cb(hanzi[0]);
-  } else {
-    cb([]);
-  }
+import vibrator from '@system.vibrator'
+import device from '@system.device'
+import { SimpleInputMethod } from './assets/dicUtil.js'
+import { zhinengabc as abc } from './assets/schema/abc.js'
+import { pyjj } from './assets/schema/pyjj.js'
+import { xiaohe } from './assets/schema/xiaohe.js'
+import { zrm } from './assets/schema/zrm.js'
+
+const schemaOptions = [
+  { id: 'full', name: '全拼', schema: null },
+  { id: 'zrm', name: '自然码', schema: zrm },
+  { id: 'xiaohe', name: '小鹤双拼', schema: xiaohe },
+  { id: 'abc', name: '智能ABC', schema: abc },
+  { id: 'pyjj', name: '拼音加加', schema: pyjj },
+]
+
+function getSchemaOptionIndex(schemaId) {
+  const index = schemaOptions.findIndex((option) => option.id === schemaId)
+  return index === -1 ? 0 : index
 }
+
+function doSearchDic(word, lang, shuangpinIndex, cb) {
+  if (!word) {
+    cb({ chars: [], matched: '', multi: null, decoded: null })
+    return
+  }
+
+  const res = lang === 'cn' && shuangpinIndex
+    ? SimpleInputMethod.getShuangpinHanzi(word, shuangpinIndex)
+    : SimpleInputMethod.getHanzi(word, lang)
+  cb({ chars: res.chars, matched: res.matched, multi: res.multi, decoded: res.decoded || null })
+}
+
 function deleteLast(t) {
   if (t) {
-    return t.substr(0, t.length - 1);
+    return t.slice(0, t.length - 1)
   }
-  return "";
+  return ''
 }
 export default {
   props: {
     hide: {
       default: true,
     },
-    vibratemode: {
-      default: "",
+    keyboardtype: {
+      default: "QWERTY",
     },
+    maxlength: {
+      default: 5,
+    },
+    vibratemode: {
+      default: '',
+    },
+    defaultschema: 'full',
   },
   data: {
     cval: "",
+    // 拼音分词显示串（如 ni'hao），在 resetResultList 中随 cval 同步更新
+    cvalDisplay: "",
     resultList: [],
     resultList2: [],
+    // 多拼：整词候选（最前）及其与单字合并后的首页展示序列与对应整词标记
+    resultWordList: [],
+    resultRow0: [],
+    resultRow0IsWord: [],
+    // 当前已匹配的拼音前缀长度（用于逐字递进选择：选一个单字只消费对应长度）
+    matchedLen: 0,
+    // 每音节首字 + 累计拼音偏移（逐字递进选择：选哪个字就消费到哪个偏移位置）
+    sylTopChars: [],
     waitingList: [],
     waitingIndex: -1,
     lastWaitingStr: "",
     downFlag: "",
     lang: "cn",
     numFlag: false,
+    numFlag_jp: false,
     upperFlag: false,
-    cvalList: [0, 1, 2, 3, 4, 5],
-    percent: 0,
+    currentSchema: 'full',
+    schemaPickerVisible: false,
+    schemaSelected: 0,
+    schemaNames: schemaOptions.map((option) => option.name),
+    decodedRawLen: 0,
+    // 键盘子树是否已建入 DOM：首次弹出置 true 保活（之后 hide 只走 show 显隐，不重建）
+    keyboardCreated: false,
+    percent66: 0,
+    // 针对胶囊屏设备，会自动获取screenWidth用于居中键盘内容
     screenWidth: 212,
     keys: {
       full: [
@@ -121,55 +214,146 @@ export default {
         ["~", "!", "@", "#", "%", "“", "”", "*", "?", "/"],
         ["(", ")", "-", "_", ":", ";", "，", "。", "."],
       ],
+      sign_jp: [
+        ["1", "2", "3", "4", "5", "6", "7", "8", "9", "0"],
+        ["~", "•", "@", "#", "%", "「", "」", "*", "?", "/"],
+        ["(", ")", "-", "…", ":", ";", "、", "。", "!"],
+      ],
+      t9: [
+        ["abc", "def"],
+        ["ghi", "jkl", "mno"],
+        ["pqrs", "tuv", "wxyz"],
+      ],
     },
   },
   onInit() {
-    if (this.maxlength) {
-      const tempCvalList = [];
-      for (let i = 0; i < 6; i++) {
-        tempCvalList.push(i);
-      }
-      this.cvalList = tempCvalList;
+    this.schemaSelected = getSchemaOptionIndex(this.defaultschema)
+    this.currentSchema = schemaOptions[this.schemaSelected].id
+    this.replaceActiveSchema(schemaOptions[this.schemaSelected])
+    this.adjustScreenWidth()
+    // 字典懒初始化：进入页面时键盘隐藏(hide=true)，无需建词索引；首次弹出(hide→false)时才 initDict。
+    if (!this.hide) {
+      // 挂载即展开的用法：键盘子树直接创建并保活
+      this.keyboardCreated = true
+      this._ensureDictInit();
     }
     this.$watch("hide", "watchHidePropsChange");
-    this.$watch("maxlength", "watchMaxLengthPropsChange");
+    this.$watch("keyboardtype", "watchKeyboardTypePropsChange");
+  },
+  replaceActiveSchema(option) {
+    this.__activeSchemaIndex = option.schema
+      ? SimpleInputMethod.buildShuangpinIndex(option.schema)
+      : null
+  },
+  clearComposition() {
+    this.cval = ''
+    this.clearWaiting()
+    this.resetResultList()
+  },
+  onLangLongPress() {
+    if (this.lang !== 'cn' || this.numFlag || this.downFlag !== '') return
+    this.onVibrate()
+    this.schemaSelected = getSchemaOptionIndex(this.currentSchema)
+    this.schemaPickerVisible = true
+  },
+  onLangClick() {
+    if (this.schemaPickerVisible) {
+      this.onSchemaPickerCancel()
+      return
+    }
+    this.onBtnClick('lang')
+  },
+  onSchemaPickerCancel() {
+    this.schemaPickerVisible = false
+  },
+  onSchemaPickerChange(event) {
+    const selected = parseInt(event.newSelected, 10)
+    const option = schemaOptions[selected]
+    this.schemaPickerVisible = false
+    this.schemaSelected = selected
+    if (option.id === this.currentSchema) return
+
+    this.currentSchema = option.id
+    this.replaceActiveSchema(option)
+    this.clearComposition()
   },
   addAllTxt(txt) {
     this.$emit("complete", { content: txt });
   },
   onRsSelect(txt) {
-    this.onVibrate();
+    this.onVibrate()
+    if (this.lang === 'cn' && this.waitingIndex >= 0) {
+      this.cval += this.waitingList[this.waitingIndex]
+      this.clearWaiting()
+    }
+    // 检查是否为每音节首字 → 按偏移消费 cval 前缀
+    let consumed = false;
+    if (txt.length === 1 && this.sylTopChars.length > 0 && this.cval.length > 0) {
+      for (let si = 0; si < this.sylTopChars.length; si++) {
+        if (this.sylTopChars[si].char === txt && this.sylTopChars[si].offset > 0 && this.sylTopChars[si].offset <= this.cval.length) {
+          this.cval = this.cval.slice(this.sylTopChars[si].offset);
+          this.addAllTxt(txt);
+          this.clearWaiting();
+          this.resetResultList();
+          this.downFlag = "";   // 下展 list 在 Vela 中缓存不刷新，先收回用顶行展示新数据
+          consumed = true;
+          break;
+        }
+      }
+    }
+    if (consumed) return;
+    // 单字兜底：只消费已匹配的拼音前缀长度（兼容 matchedLen）
+    if (txt.length === 1 && this.matchedLen > 0 && this.cval.length > this.matchedLen) {
+      this.cval = this.cval.slice(this.matchedLen);
+      this.addAllTxt(txt);
+      this.clearWaiting();
+      this.resetResultList();
+      this.downFlag = "";
+      return;
+    }
+    // 双拼只消费已成功解码的连续前缀，无效双码或奇数尾码继续留在输入区。
+    if (this.currentSchema !== 'full' && this.decodedRawLen > 0 && this.cval.length > this.decodedRawLen) {
+      this.cval = this.cval.slice(this.decodedRawLen)
+      this.addAllTxt(txt)
+      this.clearWaiting()
+      this.resetResultList()
+      this.downFlag = ''
+      return
+    }
+    // 整词或多字：整体清空 cval 并一次输出
     this.cval = "";
     this.addAllTxt(txt);
     this.clearWaiting();
-    this.resetReslutList();
+    this.resetResultList();
     this.downFlag = "";
   },
   onBtnClick(sign) {
-    this.onVibrate();
+    this.onVibrate()
     switch (sign) {
       case "AC":
-        this.cval = "";
-        this.clearWaiting();
-        this.resetReslutList();
+        this.clearComposition()
         break;
       case "lang":
-        if (this.lang === "cn") {
-          this.lang = "en";
+        if (this.keyboardtype === "T9") {
+          this.lang = this.lang === "cn" ? "en" : "cn";
         } else {
-          this.lang = "cn";
+          if (this.lang === "cn") {
+            this.lang = "en";
+          } else if (this.lang === "en") {
+            this.lang = "jp";
+          } else {
+            this.lang = "cn";
+          }
         }
-        this.cval = "";
-        this.clearWaiting();
-        this.resetReslutList();
+        this.clearComposition()
         break;
       case "D":
         if (this.waitingIndex >= 0) {
           this.clearWaiting();
-          this.resetReslutList();
+          this.resetResultList();
         } else if (this.cval.length > 0) {
           this.cval = deleteLast(this.cval);
-          this.resetReslutList();
+          this.resetResultList();
         } else {
           this.$emit("delete", {});
         }
@@ -177,15 +361,12 @@ export default {
       case "space":
         this.addAllTxt(" ");
         break;
-      case "enter":
-        this.addAllTxt("\n");
-        break;
       case "down":
         this.downFlag = this.downFlag === "down" ? "" : "down";
         break;
       case "select":
         if (this.lastWaitingStr != sign && this.lastWaitingStr) {
-          if (this.lang === "cn") {
+          if (this.lang === "cn" || this.lang === 'jp') {
             this.cval += this.waitingList[this.waitingIndex];
           } else {
             if (this.upperFlag) {
@@ -195,17 +376,22 @@ export default {
             }
           }
           this.clearWaiting();
-          this.resetReslutList();
+          this.resetResultList();
         }
         break;
       case "switchNum":
         this.numFlag = true;
-        this.cval = "";
-        this.clearWaiting();
-        this.resetReslutList();
+        this.numFlag_jp = false;
+        this.clearComposition()
+        break;
+      case "switchNum_jp":
+        this.numFlag = true;
+        this.numFlag_jp = true;
+        this.clearComposition()
         break;
       case "switchCn":
         this.numFlag = false;
+        this.numFlag_jp = false;
         break;
       case "switchUpper":
         this.upperFlag = true;
@@ -224,7 +410,7 @@ export default {
                 this.waitingIndex = 0;
               }
             } else {
-              if (this.lang === "cn") {
+              if (this.lang === "cn" || this.lang === 'jp') {
                 this.cval += this.waitingList[this.waitingIndex];
               } else {
                 if (this.upperFlag) {
@@ -246,7 +432,7 @@ export default {
             this.waitingIndex = 0;
             this.waitingList = sign.split("");
           }
-          this.resetReslutList();
+          this.resetResultList();
         }
         break;
     }
@@ -256,48 +442,109 @@ export default {
     this.waitingIndex = -1;
     this.lastWaitingStr = "";
   },
-  resetReslutList() {
-    this.$element("cvalWaiting").scrollTo({
-      top: 0,
-      left: 0,
-      behavior: "smooth",
-    });
+  resetResultList() {
     let watingStr = "";
     if (this.lastWaitingStr && this.lastWaitingStr[this.waitingIndex]) {
       watingStr = this.lastWaitingStr[this.waitingIndex];
     }
-    if (!(this.cval + watingStr) || this.lang != "cn") {
+    const effectiveCode = this.cval + watingStr
+    if (this.lang === 'cn' && this.__activeSchemaIndex) {
+      this.cvalDisplay = SimpleInputMethod.decodeShuangpin(effectiveCode, this.__activeSchemaIndex).display
+    } else {
+      this.cvalDisplay = this.lang === 'cn'
+        ? SimpleInputMethod.getSegmentedDisplay(effectiveCode)
+        : effectiveCode
+    }
+    if (!effectiveCode || (this.lang !== "cn" && this.lang !== "jp")) {
       this.resultList = [];
+      this.resultWordList = [];
+      this.matchedLen = 0
+      this.decodedRawLen = 0
+      this.sylTopChars = []
       this.setResultListAll();
       return;
     }
-    this.getResultByWord(this.cval + watingStr);
+    this.getResultByWord(effectiveCode);
   },
   setResultListAll() {
+    // 首页展示序列：整词在前，单字随后，截断到 maxlength
+    const cap = parseInt(this.maxlength);
+    let row0 = [];
+    let row0IsWord = [];
+    for (let i = 0; i < this.resultWordList.length && row0.length < cap; i++) {
+      row0.push(this.resultWordList[i]);
+      row0IsWord.push(true);
+    }
+    // 单字候选去重：同音单字串首字可能与整词/逐字首字重复（如 shishei 的「是」），跳过
+    for (let i = 0; i < this.resultList.length && row0.length < cap; i++) {
+      if (this.resultWordList.indexOf(this.resultList[i]) !== -1) continue;
+      row0.push(this.resultList[i]);
+      row0IsWord.push(false);
+    }
+    this.resultRow0 = row0;
+    this.resultRow0IsWord = row0IsWord;
+
+    // 下展分页（down 展开）：所有屏幕固定为五列，整词优先，再单字。
     this.resultList2 = [];
+    const expandedCap = 5;
     let array = [];
-    for (let i = 0; i < this.resultList.length; i++) {
-      array.push(this.resultList[i]);
-      if (array.length === 5) {
+    for (let i = 0; i < this.resultWordList.length; i++) {
+      array.push(this.resultWordList[i]);
+      if (array.length === expandedCap) {
         this.resultList2.push(array);
         array = [];
       }
     }
-    if (array.length > 0 && array.length < 5) {
+    for (let i = 0; i < this.resultList.length; i++) {
+      if (this.resultWordList.indexOf(this.resultList[i]) !== -1) continue;
+      array.push(this.resultList[i]);
+      if (array.length === expandedCap) {
+        this.resultList2.push(array);
+        array = [];
+      }
+    }
+    if (array.length > 0) {
       this.resultList2.push(array);
     }
   },
   getResultByWord(val) {
     const that = this;
-    doSearchDic(val, function (data) {
-      that.resultList = data;
+    doSearchDic(val, that.lang, that.__activeSchemaIndex, function (data) {
+      that.resultList = data.chars;                       // 单字候选（沿用）
+      that.matchedLen = data.matched ? data.matched.length : 0;
+      that.decodedRawLen = data.decoded ? data.decoded.rawConsumed : 0
+      const multi = data.multi || { words: [], composed: "", sylTopChars: [] };
+      that.sylTopChars = (multi.sylTopChars || []).filter(function(sc) { return sc.char && sc.offset > 0; });
+      let words = (multi.words || []).slice();
+      // 词库未命中但分词组合出多字串 → 也作为一条整词候选（排在整词区末尾，但在逐字首字之前）
+      if (words.length === 0 && multi.composed && multi.composed.length >= 2) {
+        words = [multi.composed];
+      } else if (multi.composed && multi.composed.length >= 2 && words.indexOf(multi.composed) === -1) {
+        words.push(multi.composed);
+      }
+      // 每音节首字放在整词后面、同音单字前面
+      const sylOnlyChars = that.sylTopChars.map(function(sc) { return sc.char; });
+      // 去重：音节首字列表中可能重复，从前往后去重
+      const seen = {};
+      const uniqueSylChars = [];
+      for (var si = 0; si < sylOnlyChars.length; si++) {
+        if (!seen[sylOnlyChars[si]]) { seen[sylOnlyChars[si]] = 1; uniqueSylChars.push(sylOnlyChars[si]); }
+      }
+      for (var si = 0; si < uniqueSylChars.length; si++) {
+        if (words.indexOf(uniqueSylChars[si]) === -1) { words.push(uniqueSylChars[si]); }
+      }
+      that.resultWordList = words;
       that.setResultListAll();
     });
   },
   onSelect(num) {
     this.$emit("keyDown", { content: num });
-    this.onVibrate();
-    if (this.lang === "cn" && !this.numFlag) {
+    if (this.keyboardtype === "T9") {
+      this.onBtnClick(num);
+      return;
+    }
+    this.onVibrate()
+    if ((this.lang === 'cn' || this.lang === 'jp')  && !this.numFlag) {
       this.cval += num.toLowerCase();
     } else if (this.lang === "en" && !this.numFlag) {
       if (this.upperFlag) {
@@ -308,10 +555,10 @@ export default {
     } else {
       this.addAllTxt(num);
     }
-    this.resetReslutList();
+    this.resetResultList();
   },
   onSelectWaiting(num) {
-    this.onVibrate();
+    this.onVibrate()
     if (this.lang === "cn") {
       this.cval += this.waitingList[num].toString();
     } else {
@@ -322,24 +569,54 @@ export default {
       }
     }
     this.clearWaiting();
-    this.resetReslutList();
+    this.resetResultList();
+  },
+  watchHidePropsChange(newV) {
+    this.$emit("visibilityChange", { visible: !newV });
+    // 键盘从隐藏切到显示(hide:true→false)：首次弹出才把键盘子树建入 DOM（keyboardCreated 置 true 保活，
+    // 之后 hide 切换只走 show 显隐、不再重建）。同时懒初始化字典（幂等）。
+    if (newV === false) {
+      this.keyboardCreated = true;
+      this._ensureDictInit();
+    }
+  },
+  // 字典懒初始化入口（幂等，只跑一次）。initDict 内部还有 syllableSet 幂等守卫。
+  _ensureDictInit() {
+    if (this.__dictInitStarted) return
+    this.__dictInitStarted = true
+    SimpleInputMethod.initDict()
+  },
+  watchKeyboardTypePropsChange(newV) {
+    if (newV === "T9" && this.lang === "jp") {
+      this.lang = "cn";
+      this.cval = "";
+      this.clearWaiting();
+      this.resetResultList();
+    }
   },
   onVibrate() {
-    if (this.vibratemode != "") {
-      vibrator.vibrate({ mode: this.vibratemode });
+    if (this.vibratemode !== '') {
+      vibrator.vibrate({ mode: this.vibratemode })
     }
   },
   handelScroll(event) {
-    let percentTemp = (event.scrollX / 633) * 100;
-    this.percent = parseInt(percentTemp <= 100 ? percentTemp : 100);
+    let percentTemp66 = (event.scrollX / 633) * 100;
+    this.percent66 = parseInt(percentTemp66 <= 100 ? percentTemp66 : 100);
   },
   pushCval() {
-    this.onVibrate();
+    this.onVibrate()
     let temp = this.cval;
     this.cval = "";
     this.clearWaiting();
-    this.resetReslutList();
+    this.resetResultList();
     this.addAllTxt(temp);
+  },
+  adjustScreenWidth(){
+    device.getInfo({
+      success: (data) => {
+        this.screenWidth = data.screenWidth;
+      }
+    })
   }
 };
 </script>
@@ -351,20 +628,6 @@ export default {
 	left:0;
 	bottom:0
 }
-.item {
-	height:42px;
-	flex:1;
-}
-.calbtn0 {
-	color:#fff;
-	font-size:28px;
-	background-color:rgba(38,38,38,0);
-	border-radius:0;
-	height:52px;
-	width:36px;
-	text-align:center;
-	margin-right: 5px;
-}
 .calbtn02 {
 	color:rgb(255,255,255);
 	background-color:rgba(38,38,38,0);
@@ -373,16 +636,54 @@ export default {
 	text-align:center;
 	height:42px;
 }
-
-#keyboard {
+/* 下展分页候选文字：text 默认按内容自适应宽度，不会被固定宽度截断 */
+.calbtn-down-text {
+	color:#ffffff;
+	font-size:26px;
+	width:100%;
+	text-align:center;
+	lines:1;
+	text-overflow:ellipsis;
+}
+.candidate-matrix-cell {
+	flex:1;
+}
+.calbtnt9 {
+	color:#fff;
+	font-size:25px;
+	font-weight:bold;
+	background-color:#262626;
+	border-radius:999px;
+	margin-right:4px;
+	width:94px;
+	height:60px;
+	text-align:center;
+	border:3px solid rgba(255,255,255,0.06)
+}
+/* 拼音小字行：键盘上方 28px 提示带，透明背景，与正文重叠、单行裁剪、不可点 */
+.cvalrow-wrap {
+	width:100%;
+	height:28px;
+	background-color:transparent;
+}
+.cvalrow {
+	color:#0d84ff;
+	font-size:22px;
+	font-weight:bold;
+	lines:1;
+	text-overflow:ellipsis;
+	text-align:left;
+	padding-left:14px;
+	width:100%;
+}
+#keyboard66 {
 	position:absolute;
 	left:0px;
 	top:82px;
 	width:100%;
 	height:170px;
 }
-
-.calbtn {
+.calbtn66 {
 	color:rgb(255,255,255);
 	font-size:32px;
 	font-weight:bold;
@@ -394,17 +695,60 @@ export default {
 	text-align:center;
 	border:3px solid rgba(255,255,255,0.06);
 }
-.list {
+.list66 {
 	position:absolute;
 	left:3px;
 	top:0px;
-	width:206px;
+	width:186px;
 	height:186px;
 	border-radius:30px;
 	background-color:#262626;
 	border:3px solid rgba(255,255,255,0.06);
-	padding:10px;
-  align-items:center;
+	padding:10px
 }
-
+.item66 {
+	height:42px;
+}
+.waiting-keys {
+	width:36px;
+	height:40px;
+	text-align: center;
+}
+.schema-picker-panel {
+  width:100%;
+  position:relative;
+  align-items:center;
+  justify-content:center;
+  background-color:#000000;
+}
+.schema-picker {
+  width:100%;
+  height:100%;
+  color:#8a8a8a;
+  font-size:20px;
+  text-align:center;
+  selected-color:#ffffff;
+  selected-font-size:24px;
+}
+.keyboard-pill-t9 {
+  left:3px;
+  width:186px;
+  flex-direction:column;
+}
+.keyboard-row-pill-t9 {
+  width:186px;
+  height:55px;
+}
+.calbtnt9-pill {
+  width:60px;
+  height:55px;
+  margin-right:3px;
+  border-radius:28px;
+  color:#ffffff;
+  font-size:18px;
+  font-weight:bold;
+  text-align:center;
+  background-color:#262626;
+  border:3px solid rgba(255,255,255,0.06);
+}
 </style>
