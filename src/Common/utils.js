@@ -347,7 +347,7 @@ export function readRecoveryFile(callback) {
   });
 }
 
-// 清除恢复笔记文件
+// 清除恢复笔记文件：优先真正删除；文件不存在或删除失败时退化为写空内容，确保不再被识别为恢复笔记
 export function clearRecoveryFile(callback) {
   import('@system.file').then(file => {
     if (!file || !file.default) {
@@ -356,16 +356,32 @@ export function clearRecoveryFile(callback) {
       return;
     }
 
-    file.default.writeText({
+    // 删除失败（如文件不存在）时写空内容兜底
+    const blankOut = () => {
+      file.default.writeText({
+        uri: 'internal://files/recovery.txt',
+        text: '',
+        success: () => {
+          console.log('恢复笔记文件 recovery.txt 已清空');
+          if (callback) callback(null);
+        },
+        fail: (data, code) => {
+          console.error(`清空恢复笔记文件失败: ${code}`, data);
+          if (callback) callback(new Error(`Failed to clear recovery file: ${code}`));
+        }
+      });
+    };
+
+    file.default.delete({
       uri: 'internal://files/recovery.txt',
-      text: '',
       success: () => {
-        console.log('恢复笔记文件 recovery.txt 清除成功');
+        console.log('恢复笔记文件 recovery.txt 删除成功');
         if (callback) callback(null);
       },
       fail: (data, code) => {
-        console.error(`清除恢复笔记文件失败: ${code}`, data);
-        if (callback) callback(new Error(`Failed to clear recovery file: ${code}`));
+        // 文件本就不存在或删除失败：退化为清空
+        console.log(`删除恢复笔记文件失败，改为清空: ${code}`, data);
+        blankOut();
       }
     });
   }).catch(err => {

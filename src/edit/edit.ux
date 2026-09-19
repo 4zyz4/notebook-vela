@@ -646,9 +646,8 @@ export default {
   back() {
     // 检查笔记是否已保存或者内容为空
     if (this.isSaved || !this.currentText || this.currentText.trim() === '') {
-      // 清除恢复文件
-      this.clearRecoveryFile();
-      router.back();
+      // 清除恢复文件完成后再返回，避免 index 读到残留恢复文件
+      this.clearRecoveryFileThen(() => router.back());
     } else {
       // 如果未保存且有内容，则显示确认对话框
       this.showExitConfirm = true;
@@ -868,16 +867,15 @@ export default {
       // 恢复输入法显示状态
       this.updateInputState(true);
       
-      // 保存成功后清除恢复文件
-      this.clearRecoveryFile();
+      // 保存成功后清除恢复文件，再通知 index 刷新，避免 index 读到残留恢复文件
+      this.clearRecoveryFileThen(() => {
+        notifyNotesChange();
+      });
       
       //计算safe-area大小
       this.$nextTick(function () { 
         this.scrollToBottom()
       });
-      
-      // 通知index页面笔记已更改
-      notifyNotesChange();
     } catch (innerError) {
       console.error("保存成功回调处理异常:", innerError);
     }
@@ -993,13 +991,14 @@ export default {
     prompt.showToast({
       message: '删除成功'
     });
-    // 返回主页面
-    setTimeout(() => {
-      router.back();
-    }, 500);
-    
-    // 通知index页面笔记已更改
-    notifyNotesChange();
+    // 删除后清除恢复文件完成再返回主页面，避免 index 残留恢复笔记
+    this.clearRecoveryFileThen(() => {
+      // 通知index页面笔记已更改
+      notifyNotesChange();
+      setTimeout(() => {
+        router.back();
+      }, 500);
+    });
   },
   
   // 取消退出
@@ -1011,9 +1010,8 @@ export default {
   // 确认退出
   confirmExit() {
     this.showExitConfirm = false;
-    // 清除恢复文件
-    this.clearRecoveryFile();
-    router.back();
+    // 清除恢复文件完成后再返回，避免 index 读到残留恢复文件
+    this.clearRecoveryFileThen(() => router.back());
   },
   
   // 安全滚动到底部方法
@@ -1063,8 +1061,17 @@ export default {
     });
   },
   
-  // 清除恢复文件
-  clearRecoveryFile() {
+  // 清除恢复文件完成后再执行回调，确保异步删除完成后再离开页面/刷新，
+  // 避免 index 在 onShow 时读到尚未删除的恢复文件而残留“恢复的笔记”。
+  clearRecoveryFileThen(done) {
+    let finished = false;
+    const finish = () => {
+      if (finished) return;
+      finished = true;
+      if (typeof done === 'function') done();
+    };
+    // 兜底：文件模块异常时也不能阻塞离开页面
+    setTimeout(finish, 1000);
     import('../Common/utils.js').then(utils => {
       utils.clearRecoveryFile((err) => {
         if (err) {
@@ -1072,8 +1079,17 @@ export default {
         } else {
           console.log("恢复文件 recovery.txt 清除成功");
         }
+        finish();
       });
+    }).catch((err) => {
+      console.error("清除恢复文件时发生异常:", err);
+      finish();
     });
+  },
+  
+  // 清除恢复文件（不等待结果，用于页面销毁等兜底场景）
+  clearRecoveryFile() {
+    this.clearRecoveryFileThen();
   },
 }
 </script>
