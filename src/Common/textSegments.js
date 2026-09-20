@@ -6,7 +6,7 @@
 //
 // 文件仍是纯 UTF-8 文本，保证 index 预览、互连读整篇、二维码等旧路径不受影响。
 
-const DEFAULT_SEG_BYTES = 32
+const DEFAULT_SEG_BYTES = 128
 
 // ===== UTF-8 基础 =====
 
