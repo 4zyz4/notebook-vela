@@ -227,7 +227,7 @@ export default {
         const totalCount = noteIds.length
 
         noteIds.forEach((noteId) => {
-          utils.readNoteFile(noteId, (err, content) => {
+          utils.readNoteFileHead(noteId, 96, (err, content) => {
             loadedCount++
             const text = (!err && content) ? content : ''
             const parts = text.split('|')[0] || ''
@@ -571,7 +571,8 @@ export default {
           }
 
           noteEntries.forEach((noteEntry, index) => {
-            utils.readNoteFile(noteEntry.id, (err, content) => {
+            // 列表只需预览，读取头部字节即可，避免为预览读入整篇
+            utils.readNoteFileHead(noteEntry.id, 96, (err, content) => {
               loadedCount++;
 
               // 调整索引，因为前面可能插入了恢复笔记
@@ -742,8 +743,8 @@ export default {
       router.push({
         uri: '/edit',
         params: {
-          index: note.originalIndex, // 传递原始索引
-          content: note.content
+          index: note.originalIndex, // 传递原始索引（兼容删除等逻辑）
+          noteId: note.id            // 编辑页据此从磁盘按字节分段加载
         }
       })
     }, 100);
