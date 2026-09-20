@@ -28,16 +28,16 @@
         @touchmove="onTouchMove"
         @touchend="onTouchEnd">
 
-          <!-- 文本内容显示区域：只渲染游标附近的 3 个分段 -->
+          <!-- 文本内容显示区域：只渲染滚动位置处的 3 个分段（游标可不在其中） -->
           <div style="flex-direction: column;">
             <div id="chunkWrap0" style="flex-direction: column;">
-              <text style="width: 100%; text-align: left; color: #ffffff; font-size: 26px; line-height: 34px">{{blk0Before}}<span if="{{blk0Cursor}}" id="caret" class="cursor" style="width: 2px; height: 34px; vertical-align: text-bottom; color:#888888;">|</span><span if="{{blk0Cursor}}" style="color:#888888;">{{blk0After}}</span></text>
+              <text style="width: 100%; text-align: left; color: #ffffff; font-size: 26px; line-height: 34px">{{blk0Before}}<span if="{{blk0Cursor}}" id="caret" class="cursor" style="width: 2px; height: 34px; vertical-align: text-bottom; color:#888888;">|</span><span if="{{blk0Cursor}}">{{blk0After}}</span></text>
             </div>
             <div if="{{winEnd - winStart >= 1}}" id="chunkWrap1" style="flex-direction: column;">
-              <text style="width: 100%; text-align: left; color: #ffffff; font-size: 26px; line-height: 34px">{{blk1Before}}<span if="{{blk1Cursor}}" id="caret" class="cursor" style="width: 2px; height: 34px; vertical-align: text-bottom; color:#888888;">|</span><span if="{{blk1Cursor}}" style="color:#888888;">{{blk1After}}</span></text>
+              <text style="width: 100%; text-align: left; color: #ffffff; font-size: 26px; line-height: 34px">{{blk1Before}}<span if="{{blk1Cursor}}" id="caret" class="cursor" style="width: 2px; height: 34px; vertical-align: text-bottom; color:#888888;">|</span><span if="{{blk1Cursor}}">{{blk1After}}</span></text>
             </div>
             <div if="{{winEnd - winStart >= 2}}" id="chunkWrap2" style="flex-direction: column;">
-              <text style="width: 100%; text-align: left; color: #ffffff; font-size: 26px; line-height: 34px">{{blk2Before}}<span if="{{blk2Cursor}}" id="caret" class="cursor" style="width: 2px; height: 34px; vertical-align: text-bottom; color:#888888;">|</span><span if="{{blk2Cursor}}" style="color:#888888;">{{blk2After}}</span></text>
+              <text style="width: 100%; text-align: left; color: #ffffff; font-size: 26px; line-height: 34px">{{blk2Before}}<span if="{{blk2Cursor}}" id="caret" class="cursor" style="width: 2px; height: 34px; vertical-align: text-bottom; color:#888888;">|</span><span if="{{blk2Cursor}}">{{blk2After}}</span></text>
             </div>
             <div style="height: 34px;" if="{{autoScrollType === 'oneBlank'}}"></div>
             <div style="height: 68px;" if="{{autoScrollType === 'twoBlank'}}"></div>
@@ -347,16 +347,22 @@ export default {
     return materialize(this.__doc);
   },
 
-  // 根据光标所在分段计算渲染窗口（最多 3 段）
-  buildWindow() {
+  // 计算渲染窗口（最多 3 段）。anchorIndex 为窗口锚点分段，默认取游标段；
+  // 窗口一旦确定就只随滚动平移，不再跟随游标。
+  buildWindow(anchorIndex) {
     const doc = this.__doc;
     if (!doc) return;
     const n = doc.chunks.length;
-    const loc = locate(doc, this.cursorPosition);
-    let ws = loc.index - 1;
+    let anchor = typeof anchorIndex === 'number' ? anchorIndex : locate(doc, this.cursorPosition).index;
+    if (anchor < 0) anchor = 0;
+    if (anchor > n - 1) anchor = n - 1;
+    let ws = anchor - 1;
     if (ws < 0) ws = 0;
-    let we = loc.index + 1;
-    if (we > n - 1) we = n - 1;
+    let we = ws + 2;
+    if (we > n - 1) {
+      we = n - 1;
+      ws = Math.max(0, we - 2);
+    }
     this.winStart = ws;
     this.winEnd = we;
   },
@@ -368,6 +374,11 @@ export default {
       this.setBlocks('', false, '', '', false, '', '', false, '');
       return;
     }
+    // 删除可能合并分段使窗口越界，这里做一次收敛
+    const n = doc.chunks.length;
+    if (this.winStart > n - 1) this.winStart = Math.max(0, n - 1);
+    if (this.winEnd > n - 1) this.winEnd = n - 1;
+    if (this.winEnd < this.winStart) this.winEnd = this.winStart;
     const starts = doc.starts;
     let cursorSlot = -1;
     const loc = locate(doc, this.cursorPosition);
@@ -412,49 +423,22 @@ export default {
     return text.replace(/\n/g, '\n\u200B');
   },
 
-  // 光标移动/编辑后刷新窗口
-  onCursorMoved() {
-    const oldStart = this.winStart;
-    const oldEnd = this.winEnd;
-    this.buildWindow();
-    this.refreshSlices();
-    // 窗口发生平移时，把光标滚回可视区（输入时光标优先）
-    if (oldStart !== this.winStart || oldEnd !== this.winEnd) {
-      this.scrollCursorIntoView();
-    }
+  // 光标是否位于当前渲染窗口内
+  isCursorInWindow() {
+    const doc = this.__doc;
+    if (!doc) return false;
+    const loc = locate(doc, this.cursorPosition);
+    return loc.index >= this.winStart && loc.index <= this.winEnd;
   },
 
-  // 依据光标实体位置滚动，使其可见
-  scrollCursorIntoView() {
-    this.$nextTick(() => {
-      setTimeout(() => {
-        const sc = this.$element('textScroll');
-        if (!sc) return;
-        // 光标在文末：直接滚到底部
-        if (this.cursorPosition >= this.textLength()) {
-          this.scrollTopValue = 2147483647;
-          sc.scrollTo({ top: 2147483647, behavior: 'auto' });
-          return;
-        }
-        const caret = this.$element('caret');
-        if (!caret) return;
-        caret.getBoundingClientRect({
-          success: (cr) => {
-            sc.getBoundingClientRect({
-              success: (sr) => {
-                const contentPos = (cr.top - sr.top) + this.currentScrollTop;
-                const target = Math.max(0, contentPos - (sr.height || 0) / 3);
-                this.scrollTopValue = target;
-                this.currentScrollTop = target;
-                sc.scrollTo({ top: target, behavior: 'auto' });
-              },
-              fail: () => {}
-            });
-          },
-          fail: () => {}
-        });
-      }, 40);
-    });
+  // 光标移动/编辑后刷新窗口切片。
+  // followCursor 仅在“编辑前游标可见、编辑后因分段增删被挤出窗口”时为 true，
+  // 此时才把窗口锚回游标；其余情况（用户滚动、滑动游标）窗口保持不变，不拉回。
+  onCursorMoved(followCursor) {
+    if (followCursor && !this.isCursorInWindow()) {
+      this.buildWindow();
+    }
+    this.refreshSlices();
   },
 
   // 加载设置
@@ -700,8 +684,8 @@ export default {
         this.lastTouchX = currentX;
         this.lastMoveTime = currentTime;
         this.lastDeltaX = deltaX;
-        // 光标移动后刷新分段窗口与游标前后文本
-        this.onCursorMoved();
+        // 光标移动后刷新分段窗口与游标前后文本（滑动游标不拉回窗口）
+        this.onCursorMoved(false);
       }
 
       if (Math.abs(deltaY) >= moveThresholdY) {
@@ -728,6 +712,9 @@ export default {
     try {
       if (this.hideInput) return;
       
+      // 记录删除前游标是否可见，仅此时才允许窗口跟随分段合并
+      const cursorVisible = this.isCursorInWindow();
+
       // 删除光标前的字符
       if (this.cursorPosition > 0) {
         deleteRange(this.__doc, this.cursorPosition - 1, 1);
@@ -736,7 +723,7 @@ export default {
         this._recoveryDirty = true;
       }
 
-      this.onCursorMoved();
+      this.onCursorMoved(cursorVisible);
 
       //自动滚动
       if (this.cursorPosition >= this.textLength() - 1) {
@@ -765,6 +752,9 @@ export default {
       
       // 检查content是否有效，如果无效则不处理
       if (content !== undefined && content !== null && content !== '') {
+        // 记录插入前游标是否可见，仅此时才允许窗口跟随分段拆分
+        const cursorVisible = this.isCursorInWindow();
+
         // 在光标位置插入内容
         insertText(this.__doc, this.cursorPosition, content);
         this.cursorPosition += content.length;
@@ -776,7 +766,7 @@ export default {
         // 增加操作计数器
         this.incrementOperationCounter();
         
-        this.onCursorMoved();
+        this.onCursorMoved(cursorVisible);
 
         // 输入字符后，光标在末尾时自动滚到底部
         if (this.cursorPosition >= this.textLength() - 1) {
@@ -1097,10 +1087,13 @@ export default {
     this.clearRecoveryFileThen(() => router.back());
   },
   
-  // 滚动到底部：仅当光标在末尾
+  // 滚动到底部：仅当光标在末尾且位于当前窗口内
   scrollToBottom() {
-    // 如果光标不在末尾，直接返回
+    // 光标不在末尾，或已被滚出当前窗口时不跟随，避免把视图拉回
     if (this.cursorPosition < this.textLength()) {
+      return;
+    }
+    if (!this.isCursorInWindow()) {
       return;
     }
     this.scrollTopValue = 2147483647;
@@ -1117,8 +1110,7 @@ export default {
     // 分段渲染下，先把窗口重置到文档开头
     const doc = this.__doc;
     if (doc) {
-      this.winStart = 0;
-      this.winEnd = Math.min(2, doc.chunks.length - 1);
+      this.buildWindow(0);
       this.refreshSlices();
     }
     this.scrollTopValue = 0;

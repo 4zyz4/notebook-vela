@@ -3,7 +3,7 @@
 // 说明：笔记文件由 writeText 写成 UTF-8；本模块手写 UTF-8 编解码，
 // 避免依赖平台不保证存在的 TextDecoder。
 
-const DEFAULT_SEG_BYTES = 128
+const DEFAULT_SEG_BYTES = 32
 
 // 计算字符串的 UTF-8 字节数
 export function utf8ByteLength(str) {
