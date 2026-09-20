@@ -190,7 +190,7 @@ import router from '@system.router'
 import prompt from '@system.prompt'
 import vibrator from '@system.vibrator'
 import {notifyNotesChange, getCachedSettings } from '../Common/utils.js'
-import { createDocFromText, loadDocFromFile, getRange, insertText, deleteRange, locate, materialize, writeChunks } from '../Common/textSegments.js'
+import { createDocFromText, openDoc, getRange, insertText, deleteRange, locate, materialize, writeDocToUri, commitDoc, loadRange, setWindow, isLoaded } from '../Common/textSegments.js'
 
 // 调试用：单段字节长度（正式值为 512，调小便于观察分段/翻段行为）
 const SEG_BYTES = 128
@@ -294,24 +294,24 @@ export default {
       this.initDoc();
     } catch (e) {
       console.error('初始化页面时出错:', e);
-      this.__doc = createDocFromText('', SEG_BYTES);
+      this.__doc = createDocFromText('', SEG_BYTES, '');
       this.hideInput = false;
     }
   },
 
   // ===== 分段文档 =====
   initDoc() {
-    // 恢复笔记：直接使用传入的全文
+    // 恢复笔记：全文已在内存，直接建文档
     if (this.fromRecovery) {
-      this.__doc = createDocFromText(this.content || '', SEG_BYTES);
+      this.__doc = createDocFromText(this.content || '', SEG_BYTES, '');
       this.afterDocReady();
       return;
     }
-    // 编辑既有笔记：从磁盘按字节分段读取
+    // 编辑既有笔记：只读段表（idx），段文本按需读取
     if (this.noteId) {
-      loadDocFromFile(`internal://files/note_${this.noteId}.txt`, SEG_BYTES, (err, doc) => {
+      openDoc(`internal://files/note_${this.noteId}.txt`, SEG_BYTES, (err, doc) => {
         if (err || !doc) {
-          this.__doc = createDocFromText(this.content || '', SEG_BYTES);
+          this.__doc = createDocFromText(this.content || '', SEG_BYTES, '');
         } else {
           this.__doc = doc;
         }
@@ -320,7 +320,7 @@ export default {
       return;
     }
     // 新笔记
-    this.__doc = createDocFromText(this.content || '', SEG_BYTES);
+    this.__doc = createDocFromText(this.content || '', SEG_BYTES, '');
     this.afterDocReady();
   },
 
@@ -328,23 +328,50 @@ export default {
     // 光标初始在末尾
     this.cursorPosition = this.textLength();
     this.buildWindow();
-    this.refreshSlices();
-    // 从恢复文件进入：先落盘一次
-    if (this.fromRecovery && this.textLength() > 0 && this.fullText().trim() !== '') {
-      this.saveToFile();
-    }
-    this.$nextTick(() => {
-      setTimeout(() => this.scrollToBottom(), 60);
+    this.loadWindowAndRender(() => {
+      // 从恢复文件进入：先落盘一次
+      if (this.fromRecovery && this.textLength() > 0) {
+        this.saveToFile();
+      }
+      this.$nextTick(() => {
+        setTimeout(() => this.scrollToBottom(), 60);
+      });
     });
-    console.log("编辑器初始化完成, 段数:", this.__doc ? this.__doc.chunks.length : 0);
+    console.log("编辑器初始化完成, 段数:", this.__doc ? this.__doc.segments.length : 0);
   },
 
   textLength() {
     return this.__doc ? this.__doc.charCount : 0;
   },
 
-  fullText() {
-    return materialize(this.__doc);
+  // 加载窗口内的段文本（磁盘按需读取），完成后渲染
+  loadWindowAndRender(cb) {
+    const doc = this.__doc;
+    if (!doc) {
+      this.refreshSlices();
+      if (cb) cb();
+      return;
+    }
+    loadRange(doc, this.winStart, this.winEnd, (err) => {
+      if (err) console.error('加载分段失败:', err);
+      setWindow(doc, this.winStart, this.winEnd);
+      this.refreshSlices();
+      if (cb) cb();
+    });
+  },
+
+  // 确保游标附近的分段已加载（编辑前调用）
+  ensureCursorLoaded(cb) {
+    const doc = this.__doc;
+    if (!doc) {
+      if (cb) cb();
+      return;
+    }
+    const idx = locate(doc, this.cursorPosition).index;
+    loadRange(doc, idx - 1, idx + 1, (err) => {
+      if (err) console.error('加载游标分段失败:', err);
+      if (cb) cb();
+    });
   },
 
   // 计算渲染窗口（最多 3 段）。anchorIndex 为窗口锚点分段，默认取游标段；
@@ -352,7 +379,7 @@ export default {
   buildWindow(anchorIndex) {
     const doc = this.__doc;
     if (!doc) return;
-    const n = doc.chunks.length;
+    const n = doc.segments.length;
     let anchor = typeof anchorIndex === 'number' ? anchorIndex : locate(doc, this.cursorPosition).index;
     if (anchor < 0) anchor = 0;
     if (anchor > n - 1) anchor = n - 1;
@@ -375,7 +402,7 @@ export default {
       return;
     }
     // 删除可能合并分段使窗口越界，这里做一次收敛
-    const n = doc.chunks.length;
+    const n = doc.segments.length;
     if (this.winStart > n - 1) this.winStart = Math.max(0, n - 1);
     if (this.winEnd > n - 1) this.winEnd = n - 1;
     if (this.winEnd < this.winStart) this.winEnd = this.winStart;
@@ -434,11 +461,28 @@ export default {
   // 光标移动/编辑后刷新窗口切片。
   // followCursor 仅在“编辑前游标可见、编辑后因分段增删被挤出窗口”时为 true，
   // 此时才把窗口锚回游标；其余情况（用户滚动、滑动游标）窗口保持不变，不拉回。
+  // 窗口内分段是否都已加载
+  isWindowLoaded() {
+    const doc = this.__doc;
+    if (!doc) return false;
+    for (let i = this.winStart; i <= this.winEnd; i++) {
+      if (!isLoaded(doc, i)) return false;
+    }
+    return true;
+  },
+
   onCursorMoved(followCursor) {
     if (followCursor && !this.isCursorInWindow()) {
       this.buildWindow();
     }
-    this.refreshSlices();
+    const doc = this.__doc;
+    if (doc && this.isWindowLoaded()) {
+      // 窗口已加载：同步刷新，避免滑动光标时的异步延迟
+      setWindow(doc, this.winStart, this.winEnd);
+      this.refreshSlices();
+      return;
+    }
+    this.loadWindowAndRender();
   },
 
   // 加载设置
@@ -711,28 +755,30 @@ export default {
   onDelete() {
     try {
       if (this.hideInput) return;
-      
+
       // 记录删除前游标是否可见，仅此时才允许窗口跟随分段合并
       const cursorVisible = this.isCursorInWindow();
 
-      // 删除光标前的字符
-      if (this.cursorPosition > 0) {
-        deleteRange(this.__doc, this.cursorPosition - 1, 1);
-        this.cursorPosition--;
-        this.isSaved = false;
-        this._recoveryDirty = true;
-      }
+      this.ensureCursorLoaded(() => {
+        // 删除光标前的字符
+        if (this.cursorPosition > 0) {
+          deleteRange(this.__doc, this.cursorPosition - 1, 1);
+          this.cursorPosition--;
+          this.isSaved = false;
+          this._recoveryDirty = true;
+        }
 
-      this.onCursorMoved(cursorVisible);
+        this.onCursorMoved(cursorVisible);
 
-      //自动滚动
-      if (this.cursorPosition >= this.textLength() - 1) {
-        this.$nextTick(() => this.scrollToBottom());
-      }
+        //自动滚动
+        if (this.cursorPosition >= this.textLength() - 1) {
+          this.$nextTick(() => this.scrollToBottom());
+        }
 
-      // 增加操作计数器
-      this.incrementOperationCounter();
-      
+        // 增加操作计数器
+        this.incrementOperationCounter();
+      });
+
     } catch (e) {
       console.error('处理删除操作时出错:', e);
     }
@@ -755,23 +801,25 @@ export default {
         // 记录插入前游标是否可见，仅此时才允许窗口跟随分段拆分
         const cursorVisible = this.isCursorInWindow();
 
-        // 在光标位置插入内容
-        insertText(this.__doc, this.cursorPosition, content);
-        this.cursorPosition += content.length;
-        
-        // 标记为未保存
-        this.isSaved = false;
-        this._recoveryDirty = true;
-        
-        // 增加操作计数器
-        this.incrementOperationCounter();
-        
-        this.onCursorMoved(cursorVisible);
+        this.ensureCursorLoaded(() => {
+          // 在光标位置插入内容
+          insertText(this.__doc, this.cursorPosition, content);
+          this.cursorPosition += content.length;
+          
+          // 标记为未保存
+          this.isSaved = false;
+          this._recoveryDirty = true;
+          
+          // 增加操作计数器
+          this.incrementOperationCounter();
+          
+          this.onCursorMoved(cursorVisible);
 
-        // 输入字符后，光标在末尾时自动滚到底部
-        if (this.cursorPosition >= this.textLength() - 1) {
-          this.$nextTick(() => this.scrollToBottom());
-        }
+          // 输入字符后，光标在末尾时自动滚到底部
+          if (this.cursorPosition >= this.textLength() - 1) {
+            this.$nextTick(() => this.scrollToBottom());
+          }
+        });
       } else {
         console.log("输入完成事件内容为空或未定义，忽略处理");
       }
@@ -783,7 +831,7 @@ export default {
   // 返回操作
   back() {
     // 检查笔记是否已保存或者内容为空
-    if (this.isSaved || this.textLength() === 0 || this.fullText().trim() === '') {
+    if (this.isSaved || this.textLength() === 0) {
       // 清除恢复文件完成后再返回，避免 index 读到残留恢复文件
       this.clearRecoveryFileThen(() => router.back());
     } else {
@@ -830,9 +878,7 @@ export default {
       return;
     }
     
-    const content = this.fullText();
-    
-    if (!content || !content.trim()) {
+    if (this.textLength() === 0) {
       prompt.showToast({
         message: '内容不能为空'
       });
@@ -851,7 +897,7 @@ export default {
     }
   },
   
-  // 保存到文件的核心方法：逐段 append 写入，避免保存时拼出整串
+  // 保存到文件的核心方法：流式重写（脏段取内存、干净段从旧文件读回），避免拼出整串
   saveToFile() {
     import('../Common/utils.js').then(utils => {
       try {
@@ -865,9 +911,12 @@ export default {
         this.noteId = noteId;
         
         const uri = `internal://files/note_${noteId}.txt`;
-        if (this.__doc) this.__doc.uri = uri;
+        if (this.__doc) {
+          this.__doc.uri = uri;
+          this.__doc.idxUri = uri + '.idx';
+        }
         
-        writeChunks(uri, this.__doc ? this.__doc.chunks : [''], (err) => {
+        writeDocToUri(this.__doc, uri, (err) => {
           if (err) {
             console.error("保存笔记文件失败:", err);
             this.isSaving = false;
@@ -876,39 +925,51 @@ export default {
             });
             return;
           }
-          
-          if (this.__doc) this.__doc.dirty = false;
-          this._recoveryDirty = false;
-          
-          // 更新元数据中的时间
-          utils.readMetadata((err, metadata) => {
-            if (err || !metadata) {
-              metadata = { notes: {} };
-            }
-            if (!metadata.notes) metadata.notes = {};
-            
-            if (!metadata.notes[noteId]) {
-              metadata.notes[noteId] = {
-                createTime: this.createTime,
-                modifyTime: modifyTime
-              };
-            } else {
-              metadata.notes[noteId].modifyTime = modifyTime;
-            }
-            
-            utils.saveMetadata(metadata, (err) => {
-              if (err) {
-                console.error("保存元数据失败:", err);
-                this.isSaving = false;
-                prompt.showToast({
-                  message: '保存失败'
+
+          const commit = (info) => {
+            commitDoc(this.__doc, info, () => {
+              this._recoveryDirty = false;
+
+              // 更新元数据中的时间
+              utils.readMetadata((err, metadata) => {
+                if (err || !metadata) {
+                  metadata = { notes: {} };
+                }
+                if (!metadata.notes) metadata.notes = {};
+
+                if (!metadata.notes[noteId]) {
+                  metadata.notes[noteId] = {
+                    createTime: this.createTime,
+                    modifyTime: modifyTime
+                  };
+                } else {
+                  metadata.notes[noteId].modifyTime = modifyTime;
+                }
+
+                utils.saveMetadata(metadata, (err) => {
+                  if (err) {
+                    console.error("保存元数据失败:", err);
+                    this.isSaving = false;
+                    prompt.showToast({
+                      message: '保存失败'
+                    });
+                    return;
+                  }
+
+                  this.handleSaveSuccess();
                 });
-                return;
-              }
-              
-              this.handleSaveSuccess();
+              });
             });
-          });
+          };
+
+          import('@system.file').then(file => {
+            const f = file.default || file;
+            f.get({
+              uri: uri,
+              success: (info) => commit(info),
+              fail: () => commit(null)
+            });
+          }).catch(() => commit(null));
         });
       } catch (error) {
         console.error("保存到文件时出错:", error);
@@ -957,9 +1018,11 @@ export default {
   // 显示二维码
   showQRCode() {
     this.showMenuDialog = false;
-    this.noteContentForQR = this.fullText();
-    this.showQRDialog = true;
-    this.updateInputState(false);
+    materialize(this.__doc, (err, text) => {
+      this.noteContentForQR = err ? '' : text;
+      this.showQRDialog = true;
+      this.updateInputState(false);
+    });
   },
   
   // 关闭二维码对话框
@@ -1111,19 +1174,20 @@ export default {
     const doc = this.__doc;
     if (doc) {
       this.buildWindow(0);
-      this.refreshSlices();
     }
     this.scrollTopValue = 0;
     this.currentScrollTop = 0;
-    const scrollElement = this.$element("textScroll");
-    if (scrollElement) {
-      this.$nextTick(() => {
-        scrollElement.scrollTo({
-          top: 0,
-          behavior: 'auto'
+    this.loadWindowAndRender(() => {
+      const scrollElement = this.$element("textScroll");
+      if (scrollElement) {
+        this.$nextTick(() => {
+          scrollElement.scrollTo({
+            top: 0,
+            behavior: 'auto'
+          });
         });
-      });
-    }
+      }
+    });
   },
 
   // 滚动事件：记录位置（模板里原本 @scroll 指向了未定义方法）
@@ -1149,7 +1213,7 @@ export default {
   // 窗口向下平移一段：移除顶部段，用其测得高度补偿滚动
   shiftWindowForward() {
     const doc = this.__doc;
-    if (!doc || this.winEnd >= doc.chunks.length - 1) return;
+    if (!doc || this.winEnd >= doc.segments.length - 1) return;
     this.scrollWait = true;
     const before = this.currentScrollTop;
     const el = this.$element('chunkWrap0');
@@ -1160,13 +1224,14 @@ export default {
       this.winEnd++;
       this.scrollTopValue = nt;
       this.currentScrollTop = nt;
-      this.refreshSlices();
-      this.$nextTick(() => {
-        setTimeout(() => {
-          const sc = this.$element('textScroll');
-          if (sc) sc.scrollTo({ top: nt, behavior: 'auto' });
-          this.scrollWait = false;
-        }, 60);
+      this.loadWindowAndRender(() => {
+        this.$nextTick(() => {
+          setTimeout(() => {
+            const sc = this.$element('textScroll');
+            if (sc) sc.scrollTo({ top: nt, behavior: 'auto' });
+            this.scrollWait = false;
+          }, 60);
+        });
       });
     };
     if (el) {
@@ -1193,13 +1258,14 @@ export default {
       this.winEnd--;
       this.scrollTopValue = nt;
       this.currentScrollTop = nt;
-      this.refreshSlices();
-      this.$nextTick(() => {
-        setTimeout(() => {
-          const sc = this.$element('textScroll');
-          if (sc) sc.scrollTo({ top: nt, behavior: 'auto' });
-          this.scrollWait = false;
-        }, 60);
+      this.loadWindowAndRender(() => {
+        this.$nextTick(() => {
+          setTimeout(() => {
+            const sc = this.$element('textScroll');
+            if (sc) sc.scrollTo({ top: nt, behavior: 'auto' });
+            this.scrollWait = false;
+          }, 60);
+        });
       });
     };
     if (el) {
@@ -1219,13 +1285,13 @@ export default {
     this.saveRecoveryFile();
   },
   
-  // 保存恢复文件：逐段 append 写入，避免拼出整串
+  // 保存恢复文件：流式写入（脏段取内存、干净段从笔记文件读回）
   saveRecoveryFile() {
     if (!this.__doc) return;
     if (this._recoveryWriting) return;
     if (this.isSaving) return;
     this._recoveryWriting = true;
-    writeChunks('internal://files/recovery.txt', this.__doc.chunks, (err) => {
+    writeDocToUri(this.__doc, 'internal://files/recovery.txt', (err) => {
       this._recoveryWriting = false;
       if (err) {
         console.error("保存恢复文件失败:", err);
