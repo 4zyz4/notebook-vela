@@ -1,3 +1,5 @@
+import { decodeUtf8 } from './textSegments.js'
+
 // 全局设置监听器
 let settingsListeners = [];
 
@@ -199,6 +201,50 @@ export function readNoteFile(noteId, callback) {
         console.log(`读取笔记文件失败: ${code}`, data);
         if (callback) callback(new Error(`Failed to read note file: ${code}`));
       }
+    });
+  }).catch(err => {
+    console.error('导入文件系统模块时出错:', err);
+    if (callback) callback(err);
+  });
+}
+
+// 只读取笔记文件头部若干字节（用于列表预览，避免为预览读入整篇）
+export function readNoteFileHead(noteId, maxBytes, callback) {
+  import('@system.file').then(file => {
+    if (!file || !file.default) {
+      console.error('无法导入文件系统模块');
+      if (callback) callback(new Error('Failed to import file system module'));
+      return;
+    }
+
+    const uri = `internal://files/note_${noteId}.txt`;
+    const readHead = (size) => {
+      const length = Math.max(1, Math.min(maxBytes, size));
+      file.default.readArrayBuffer({
+        uri: uri,
+        position: 0,
+        length: length,
+        success: (data) => {
+          try {
+            const bytes = new Uint8Array(data.buffer);
+            const text = decodeUtf8(bytes, 0, bytes.length).text;
+            if (callback) callback(null, text);
+          } catch (e) {
+            if (callback) callback(e);
+          }
+        },
+        fail: (data, code) => {
+          console.log(`读取笔记头部失败: ${code}`, data);
+          if (callback) callback(new Error(`Failed to read note head: ${code}`));
+        }
+      });
+    };
+
+    file.default.get({
+      uri: uri,
+      success: (info) => readHead((info && info.length) || 0),
+      // 取不到大小时按请求长度尝试
+      fail: () => readHead(maxBytes)
     });
   }).catch(err => {
     console.error('导入文件系统模块时出错:', err);

@@ -19,21 +19,28 @@
       <scroll id="textScroll"
         style="width: 100%; flex: 1; min-height: 103px; flex-direction: column; overflow: auto; padding: {{borderWidth}};"
         scroll-y="true"
+        scroll-top="{{scrollTopValue}}"
         @scroll="onScroll"
+        @scrolltop="onScrollTop"
+        @scrollbottom="onScrollBottom"
         @touchstart="onTouchStart"
         bounces="true"
         @touchmove="onTouchMove"
         @touchend="onTouchEnd">
-        
-          <!-- 文本内容显示区域 -->
+
+          <!-- 文本内容显示区域：只渲染游标附近的 3 个分段 -->
           <div style="flex-direction: column;">
-            <text style="width: 100%; text-align: left; color: #ffffff; font-size: 26px; line-height: 34px">
-              {{getTextBeforeCursor()}}
-              <span class="cursor" style="width: 2px; height: 34px; vertical-align: text-bottom; color:#888888;">|</span>
-              <span style="color:#888888;">{{getTextAfterCursor()}}</span>
-            </text>
+            <div id="chunkWrap0" style="flex-direction: column;">
+              <text style="width: 100%; text-align: left; color: #ffffff; font-size: 26px; line-height: 34px">{{blk0Before}}<span if="{{blk0Cursor}}" id="caret" class="cursor" style="width: 2px; height: 34px; vertical-align: text-bottom; color:#888888;">|</span><span if="{{blk0Cursor}}" style="color:#888888;">{{blk0After}}</span></text>
+            </div>
+            <div if="{{winEnd - winStart >= 1}}" id="chunkWrap1" style="flex-direction: column;">
+              <text style="width: 100%; text-align: left; color: #ffffff; font-size: 26px; line-height: 34px">{{blk1Before}}<span if="{{blk1Cursor}}" id="caret" class="cursor" style="width: 2px; height: 34px; vertical-align: text-bottom; color:#888888;">|</span><span if="{{blk1Cursor}}" style="color:#888888;">{{blk1After}}</span></text>
+            </div>
+            <div if="{{winEnd - winStart >= 2}}" id="chunkWrap2" style="flex-direction: column;">
+              <text style="width: 100%; text-align: left; color: #ffffff; font-size: 26px; line-height: 34px">{{blk2Before}}<span if="{{blk2Cursor}}" id="caret" class="cursor" style="width: 2px; height: 34px; vertical-align: text-bottom; color:#888888;">|</span><span if="{{blk2Cursor}}" style="color:#888888;">{{blk2After}}</span></text>
+            </div>
             <div style="height: 34px;" if="{{autoScrollType === 'oneBlank'}}"></div>
-          <div style="height: 68px;" if="{{autoScrollType === 'twoBlank'}}"></div>
+            <div style="height: 68px;" if="{{autoScrollType === 'twoBlank'}}"></div>
             <div style="height: 100px;" if="hideInput"></div>
           </div>
       </scroll>
@@ -183,21 +190,41 @@ import router from '@system.router'
 import prompt from '@system.prompt'
 import vibrator from '@system.vibrator'
 import {notifyNotesChange, getCachedSettings } from '../Common/utils.js'
+import { createDocFromText, loadDocFromFile, getRange, insertText, deleteRange, locate, materialize, writeChunks } from '../Common/textSegments.js'
+
+// 调试用：单段字节长度（正式值为 512，调小便于观察分段/翻段行为）
+const SEG_BYTES = 128
 
 export default {
+  // 非响应式实例属性：分段文档、滚动节流标记
+  __doc: null,
+  __scrollScheduled: false,
+
   private: {
     // 基础属性
     index: -1,
     content: '',
+    noteId: '',
     isEdit: false,
     hideInput: false,
-    currentText: '',
     isSaved: true,
     isSaving: false,
     vibrateMode: 'short',
     currentTime: "",
     borderWidth: '10px', // 默认边框宽度
     fromRecovery: false, // 是否从恢复文件进入
+
+    // 分段窗口渲染（最多 3 段）
+    winStart: 0,
+    winEnd: 0,
+    blk0Before: '', blk0After: '', blk0Cursor: false,
+    blk1Before: '', blk1After: '', blk1Cursor: false,
+    blk2Before: '', blk2After: '', blk2Cursor: false,
+
+    // 滚动状态
+    scrollTopValue: 0,
+    currentScrollTop: 0,
+    scrollWait: false,
 
     // 对话框控制
     showMenuDialog: false,
@@ -236,8 +263,9 @@ export default {
     lastMoveTime: 0, // 记录上次移动的时间
     lastDeltaX: 0, // 记录上次的水平位移
 
-    // 恢复文件相关
-    lastSavedRecoveryText: '', // 上次保存的恢复文本内容
+    // 恢复文件脏标记（避免每 10s 反复写整篇）
+    _recoveryDirty: false,
+    _recoveryWriting: false,
 
     // 用于保存原始笔记ID，确保编辑时始终指向正确的笔记
     originalNoteId: null,
@@ -247,7 +275,7 @@ export default {
     try {
       // 加载设置
       this.loadSettings();
-      
+
       // 设置创建时间为打开页面的时间
       this.createTime = Date.now();
 
@@ -259,32 +287,174 @@ export default {
       // 默认显示输入法
       this.hideInput = false;
 
-      // 初始化文本内容   星方：不了解机制，暂不做修改
-      if (this.content) {
-        // 直接使用笔记的完整内容，不再分割时间戳
-        this.currentText = this.content;
-      } else {
-        this.currentText = "";
-      }
-
-      // 初始化光标位置在末尾
-      this.cursorPosition = this.currentText.length;
-
       // 启动主定时器
       this.startMainTimer();
 
-      // 如果是从恢复文件进入，先执行一次保存
-      if (this.fromRecovery && this.currentText && this.currentText.trim() !== '') {
-        this.saveToFile(this.currentText);
-      }
-
-      console.log("编辑器初始化完成");
+      // 初始化分段文档（既有笔记会异步从磁盘按字节分段读取）
+      this.initDoc();
     } catch (e) {
       console.error('初始化页面时出错:', e);
-      // 设置默认值以确保页面可以正常运行
-      this.currentText = "";
+      this.__doc = createDocFromText('', SEG_BYTES);
       this.hideInput = false;
     }
+  },
+
+  // ===== 分段文档 =====
+  initDoc() {
+    // 恢复笔记：直接使用传入的全文
+    if (this.fromRecovery) {
+      this.__doc = createDocFromText(this.content || '', SEG_BYTES);
+      this.afterDocReady();
+      return;
+    }
+    // 编辑既有笔记：从磁盘按字节分段读取
+    if (this.noteId) {
+      loadDocFromFile(`internal://files/note_${this.noteId}.txt`, SEG_BYTES, (err, doc) => {
+        if (err || !doc) {
+          this.__doc = createDocFromText(this.content || '', SEG_BYTES);
+        } else {
+          this.__doc = doc;
+        }
+        this.afterDocReady();
+      });
+      return;
+    }
+    // 新笔记
+    this.__doc = createDocFromText(this.content || '', SEG_BYTES);
+    this.afterDocReady();
+  },
+
+  afterDocReady() {
+    // 光标初始在末尾
+    this.cursorPosition = this.textLength();
+    this.buildWindow();
+    this.refreshSlices();
+    // 从恢复文件进入：先落盘一次
+    if (this.fromRecovery && this.textLength() > 0 && this.fullText().trim() !== '') {
+      this.saveToFile();
+    }
+    this.$nextTick(() => {
+      setTimeout(() => this.scrollToBottom(), 60);
+    });
+    console.log("编辑器初始化完成, 段数:", this.__doc ? this.__doc.chunks.length : 0);
+  },
+
+  textLength() {
+    return this.__doc ? this.__doc.charCount : 0;
+  },
+
+  fullText() {
+    return materialize(this.__doc);
+  },
+
+  // 根据光标所在分段计算渲染窗口（最多 3 段）
+  buildWindow() {
+    const doc = this.__doc;
+    if (!doc) return;
+    const n = doc.chunks.length;
+    const loc = locate(doc, this.cursorPosition);
+    let ws = loc.index - 1;
+    if (ws < 0) ws = 0;
+    let we = loc.index + 1;
+    if (we > n - 1) we = n - 1;
+    this.winStart = ws;
+    this.winEnd = we;
+  },
+
+  // 生成 3 个分段的渲染数据（含游标所在段的 before/after）
+  refreshSlices() {
+    const doc = this.__doc;
+    if (!doc) {
+      this.setBlocks('', false, '', '', false, '', '', false, '');
+      return;
+    }
+    const starts = doc.starts;
+    let cursorSlot = -1;
+    const loc = locate(doc, this.cursorPosition);
+    if (loc.index >= this.winStart && loc.index <= this.winEnd) {
+      cursorSlot = loc.index - this.winStart;
+    }
+    const slots = [];
+    for (let j = 0; j < 3; j++) {
+      const ci = this.winStart + j;
+      if (ci > this.winEnd) {
+        slots.push({ before: '', after: '', cursor: false });
+        continue;
+      }
+      const cStart = starts[ci];
+      const cEnd = starts[ci + 1];
+      if (j === cursorSlot) {
+        slots.push({
+          before: this.normalize(getRange(doc, cStart, this.cursorPosition)),
+          after: this.normalize(getRange(doc, this.cursorPosition, cEnd)),
+          cursor: true,
+        });
+      } else {
+        slots.push({ before: this.normalize(getRange(doc, cStart, cEnd)), after: '', cursor: false });
+      }
+    }
+    this.setBlocks(
+      slots[0].before, slots[0].cursor, slots[0].after,
+      slots[1].before, slots[1].cursor, slots[1].after,
+      slots[2].before, slots[2].cursor, slots[2].after
+    );
+  },
+
+  setBlocks(b0, c0, a0, b1, c1, a1, b2, c2, a2) {
+    this.blk0Before = b0; this.blk0Cursor = c0; this.blk0After = a0;
+    this.blk1Before = b1; this.blk1Cursor = c1; this.blk1After = a1;
+    this.blk2Before = b2; this.blk2Cursor = c2; this.blk2After = a2;
+  },
+
+  // 每个换行后补零宽空格，保证空行也能看到光标
+  normalize(text) {
+    if (!text) return '';
+    return text.replace(/\n/g, '\n\u200B');
+  },
+
+  // 光标移动/编辑后刷新窗口
+  onCursorMoved() {
+    const oldStart = this.winStart;
+    const oldEnd = this.winEnd;
+    this.buildWindow();
+    this.refreshSlices();
+    // 窗口发生平移时，把光标滚回可视区（输入时光标优先）
+    if (oldStart !== this.winStart || oldEnd !== this.winEnd) {
+      this.scrollCursorIntoView();
+    }
+  },
+
+  // 依据光标实体位置滚动，使其可见
+  scrollCursorIntoView() {
+    this.$nextTick(() => {
+      setTimeout(() => {
+        const sc = this.$element('textScroll');
+        if (!sc) return;
+        // 光标在文末：直接滚到底部
+        if (this.cursorPosition >= this.textLength()) {
+          this.scrollTopValue = 2147483647;
+          sc.scrollTo({ top: 2147483647, behavior: 'auto' });
+          return;
+        }
+        const caret = this.$element('caret');
+        if (!caret) return;
+        caret.getBoundingClientRect({
+          success: (cr) => {
+            sc.getBoundingClientRect({
+              success: (sr) => {
+                const contentPos = (cr.top - sr.top) + this.currentScrollTop;
+                const target = Math.max(0, contentPos - (sr.height || 0) / 3);
+                this.scrollTopValue = target;
+                this.currentScrollTop = target;
+                sc.scrollTo({ top: target, behavior: 'auto' });
+              },
+              fail: () => {}
+            });
+          },
+          fail: () => {}
+        });
+      }, 40);
+    });
   },
 
   // 加载设置
@@ -322,11 +492,11 @@ export default {
     // 更新当前时间
     this.updateCurrentTime();
     
-    // 如果是编辑模式且尚未记录原始笔记ID，则获取原始笔记ID
-    if (this.index >= 0 && !this.originalNoteId) {
+    // 优先使用路由传入的 noteId；否则退回按索引解析
+    if (this.noteId) {
+      this.originalNoteId = this.noteId;
+    } else if (this.index >= 0 && !this.originalNoteId) {
       this.getOriginalNoteId();
-    } else {
-      //星方：你应该强制赋予id
     }
   },
 
@@ -441,27 +611,6 @@ export default {
     console.log('切换输入法显示状态成功');
   },
   
-  // 获取光标前的文本
-  getTextBeforeCursor() {
-    if (this.currentText && this.cursorPosition > 0) {
-      const text = this.currentText.substring(0, this.cursorPosition);
-      // 在每个换行符后添加零宽空格，防止光标在空行时不可见
-      return text.replace(/\n/g, '\n\u200B');
-    }
-    return '';
-  },
-  
-  // 获取光标后的文本
-  getTextAfterCursor() {
-    if (this.currentText && this.cursorPosition < this.currentText.length) {
-      const text = this.currentText.substring(this.cursorPosition);
-      // 在每个换行符后添加零宽空格，防止光标在空行时不可见
-      return text.replace(/\n/g, '\n\u200B');
-    }
-    return '';
-  },
-  
-  
   // 移动光标
   moveCursor(direction) {
     if (direction === 'left' && this.cursorPosition > 0) {
@@ -469,7 +618,7 @@ export default {
       if (this.vibrateMode) {
         vibrator.vibrate({ mode: this.vibrateMode });
       }
-    } else if (direction === 'right' && this.cursorPosition < this.currentText.length) {
+    } else if (direction === 'right' && this.cursorPosition < this.textLength()) {
       this.cursorPosition++;
       if (this.vibrateMode) {
         vibrator.vibrate({ mode: this.vibrateMode });
@@ -494,7 +643,7 @@ export default {
   
   // 触摸移动事件
   onTouchMove(event) {
-    if (event.touches && event.touches.length > 0 && this.currentText.length > 0) {
+    if (event.touches && event.touches.length > 0 && this.textLength() > 0) {
       const currentX = event.touches[0].clientX;
       const currentTime = Date.now();
       const deltaTime = currentTime - this.lastMoveTime;
@@ -551,6 +700,8 @@ export default {
         this.lastTouchX = currentX;
         this.lastMoveTime = currentTime;
         this.lastDeltaX = deltaX;
+        // 光标移动后刷新分段窗口与游标前后文本
+        this.onCursorMoved();
       }
 
       if (Math.abs(deltaY) >= moveThresholdY) {
@@ -579,16 +730,16 @@ export default {
       
       // 删除光标前的字符
       if (this.cursorPosition > 0) {
-        const beforeCursor = this.currentText.substring(0, this.cursorPosition - 1);
-        const afterCursor = this.currentText.substring(this.cursorPosition);
-        this.currentText = beforeCursor + afterCursor;
+        deleteRange(this.__doc, this.cursorPosition - 1, 1);
         this.cursorPosition--;
         this.isSaved = false;
+        this._recoveryDirty = true;
       }
-      
+
+      this.onCursorMoved();
+
       //自动滚动
-      //星方：同下
-      if (this.cursorPosition >= this.currentText.length - 1) {
+      if (this.cursorPosition >= this.textLength() - 1) {
         this.$nextTick(() => this.scrollToBottom());
       }
 
@@ -603,7 +754,6 @@ export default {
   // 处理输入事件
   onInputComplete(e) {
     try {
-      console.log("输入完成:", JSON.stringify(e));
       // 检查event对象是否存在
       if (!e) {
         console.warn("输入完成事件对象为空");
@@ -615,28 +765,26 @@ export default {
       
       // 检查content是否有效，如果无效则不处理
       if (content !== undefined && content !== null && content !== '') {
-        console.log("处理输入内容:", content);
         // 在光标位置插入内容
-        const beforeCursor = this.currentText.substring(0, this.cursorPosition);
-        const afterCursor = this.currentText.substring(this.cursorPosition);
-        this.currentText = beforeCursor + content + afterCursor;
+        insertText(this.__doc, this.cursorPosition, content);
         this.cursorPosition += content.length;
         
         // 标记为未保存
         this.isSaved = false;
+        this._recoveryDirty = true;
         
         // 增加操作计数器
         this.incrementOperationCounter();
-                
-        // 输入字符后自动滚动到底部
-        //星方：修改，应该是当光标在底部时自动滚动
-        if (this.cursorPosition >= this.currentText.length - 1) {
+        
+        this.onCursorMoved();
+
+        // 输入字符后，光标在末尾时自动滚到底部
+        if (this.cursorPosition >= this.textLength() - 1) {
           this.$nextTick(() => this.scrollToBottom());
         }
       } else {
         console.log("输入完成事件内容为空或未定义，忽略处理");
       }
-      // 如果content无效，则忽略该事件，因为我们已经在onKeyDown中处理了输入
     } catch (error) {
       console.error('处理输入完成时出错:', error);
     }
@@ -645,7 +793,7 @@ export default {
   // 返回操作
   back() {
     // 检查笔记是否已保存或者内容为空
-    if (this.isSaved || !this.currentText || this.currentText.trim() === '') {
+    if (this.isSaved || this.textLength() === 0 || this.fullText().trim() === '') {
       // 清除恢复文件完成后再返回，避免 index 读到残留恢复文件
       this.clearRecoveryFileThen(() => router.back());
     } else {
@@ -692,7 +840,7 @@ export default {
       return;
     }
     
-    const content = this.currentText;
+    const content = this.fullText();
     
     if (!content || !content.trim()) {
       prompt.showToast({
@@ -703,7 +851,7 @@ export default {
     
     this.isSaving = true;
     try {
-      this.saveToFile(content);
+      this.saveToFile();
     } catch (error) {
       console.error("保存笔记时出错:", error);
       this.isSaving = false;
@@ -713,46 +861,54 @@ export default {
     }
   },
   
-  // 保存到文件的核心方法
-  saveToFile(content) {
-    //星方：错误的try-catch使用（错误无法正确捕捉）（已修复）
+  // 保存到文件的核心方法：逐段 append 写入，避免保存时拼出整串
+  saveToFile() {
     import('../Common/utils.js').then(utils => {
-      try{
+      try {
         const modifyTime = Date.now();
         
-        if (this.index >= 0) {
-          // 编辑现有笔记
+        let noteId = this.noteId || this.originalNoteId;
+        if (!noteId) {
+          noteId = this.createTime.toString();
+        }
+        this.originalNoteId = noteId;
+        this.noteId = noteId;
+        
+        const uri = `internal://files/note_${noteId}.txt`;
+        if (this.__doc) this.__doc.uri = uri;
+        
+        writeChunks(uri, this.__doc ? this.__doc.chunks : [''], (err) => {
+          if (err) {
+            console.error("保存笔记文件失败:", err);
+            this.isSaving = false;
+            prompt.showToast({
+              message: '保存失败'
+            });
+            return;
+          }
+          
+          if (this.__doc) this.__doc.dirty = false;
+          this._recoveryDirty = false;
+          
+          // 更新元数据中的时间
           utils.readMetadata((err, metadata) => {
-            if (err) {
-              console.error("读取元数据失败:", err);
-              this.isSaving = false;
-              prompt.showToast({
-                message: '保存失败'
-              });
-              return;
+            if (err || !metadata) {
+              metadata = { notes: {} };
+            }
+            if (!metadata.notes) metadata.notes = {};
+            
+            if (!metadata.notes[noteId]) {
+              metadata.notes[noteId] = {
+                createTime: this.createTime,
+                modifyTime: modifyTime
+              };
+            } else {
+              metadata.notes[noteId].modifyTime = modifyTime;
             }
             
-            // 使用原始笔记ID而不是重新计算，避免因元数据变化导致保存错误
-            const noteId = this.originalNoteId;
-            
-            //星方：无意义的判断
-            //if (!noteId) {
-            //  console.error("原始笔记ID未定义");
-            //  this.isSaving = false;
-            //   prompt.showToast({
-            //    message: '保存失败'
-            //  });
-            //  return;
-            //}
-            
-            //星方：重复操作，赘余操作（后面使用noteId)
-            //this.originalNoteId = noteId;
-            
-            // 更新笔记内容
-            utils.saveNoteFile(noteId, content, (err) => {
-              //星方：建议添加反复尝试操作
+            utils.saveMetadata(metadata, (err) => {
               if (err) {
-                console.error("保存笔记文件失败:", err);
+                console.error("保存元数据失败:", err);
                 this.isSaving = false;
                 prompt.showToast({
                   message: '保存失败'
@@ -760,83 +916,10 @@ export default {
                 return;
               }
               
-              // 更新元数据中的修改时间
-              metadata.notes[noteId].modifyTime = modifyTime;
-              
-              // 保存更新后的元数据
-              utils.saveMetadata(metadata, (err) => {
-                if (err) {
-                  console.error("保存元数据失败:", err);
-                  this.isSaving = false;
-                  prompt.showToast({
-                    message: '保存失败'
-                  });
-                  return;
-                }
-                
-                this.handleSaveSuccess();
-              });
+              this.handleSaveSuccess();
             });
           });
-        } else {
-          // 添加新笔记 - 只有在originalNoteId未定义时才创建新ID
-          let noteId;
-          if (this.originalNoteId) {
-            // 如果已经设置了原始笔记ID，使用它
-            noteId = this.originalNoteId;
-          } else {
-            // 使用在onInit中设置的创建时间
-            noteId = this.createTime.toString(); // 使用创建时间作为笔记ID
-            // 记录原始笔记ID
-            this.originalNoteId = noteId;
-          }
-          
-          // 保存笔记文件
-          utils.saveNoteFile(noteId, content, (err) => {
-            if (err) {
-              console.error("保存笔记文件失败:", err);
-              this.isSaving = false;
-              prompt.showToast({
-                message: '保存失败'
-              });
-              return;
-            }
-            
-            // 读取现有元数据或创建新的元数据
-            utils.readMetadata((err, metadata) => {
-              if (err) {
-                // 如果元数据不存在，创建新的
-                metadata = { notes: {} };
-              }
-              
-              // 添加新笔记的元数据
-              if (!metadata.notes[noteId]) {
-                // 只有在笔记不存在时才设置创建时间
-                metadata.notes[noteId] = {
-                  createTime: this.createTime, // 使用在onInit中设置的创建时间
-                  modifyTime: modifyTime
-                };
-              } else {
-                // 如果笔记已存在，只更新修改时间
-                metadata.notes[noteId].modifyTime = modifyTime;
-              }
-              
-              // 保存元数据
-              utils.saveMetadata(metadata, (err) => {
-                if (err) {
-                  console.error("保存元数据失败:", err);
-                  this.isSaving = false;
-                  prompt.showToast({
-                    message: '保存失败'
-                  });
-                  return;
-                }
-                
-                this.handleSaveSuccess();
-              });
-            });
-          });
-        }
+        });
       } catch (error) {
         console.error("保存到文件时出错:", error);
         this.isSaving = false;
@@ -884,7 +967,7 @@ export default {
   // 显示二维码
   showQRCode() {
     this.showMenuDialog = false;
-    this.noteContentForQR = this.currentText;
+    this.noteContentForQR = this.fullText();
     this.showQRDialog = true;
     this.updateInputState(false);
   },
@@ -1014,50 +1097,150 @@ export default {
     this.clearRecoveryFileThen(() => router.back());
   },
   
-  // 安全滚动到底部方法
+  // 滚动到底部：仅当光标在末尾
   scrollToBottom() {
     // 如果光标不在末尾，直接返回
-    if (this.cursorPosition < this.currentText.length) {
+    if (this.cursorPosition < this.textLength()) {
       return;
     }
-    
-    const scrollElement = this.$element("textScroll")
-    scrollElement.scrollTo({
-            top: 2147483647,//最大安全整数
-            behavior: 'smooth'
-          });
-          console.log('滚动执行成功');
+    this.scrollTopValue = 2147483647;
+    const scrollElement = this.$element("textScroll");
+    if (scrollElement) {
+      scrollElement.scrollTo({
+        top: 2147483647,//最大安全整数
+        behavior: 'auto'
+      });
+    }
   },
   
   scrollToTop() {
-    const scrollElement = this.$element("textScroll")
-    scrollElement.scrollTo({
-            top: 0,
-            behavior: 'smooth'
-          });
-          console.log('滚动执行成功');
+    // 分段渲染下，先把窗口重置到文档开头
+    const doc = this.__doc;
+    if (doc) {
+      this.winStart = 0;
+      this.winEnd = Math.min(2, doc.chunks.length - 1);
+      this.refreshSlices();
+    }
+    this.scrollTopValue = 0;
+    this.currentScrollTop = 0;
+    const scrollElement = this.$element("textScroll");
+    if (scrollElement) {
+      this.$nextTick(() => {
+        scrollElement.scrollTo({
+          top: 0,
+          behavior: 'auto'
+        });
+      });
+    }
   },
-  
-  // 检查并保存恢复文件
-  checkAndSaveRecovery() {
-    // 只有当文本内容发生变化时才保存
-    if (this.currentText !== this.lastSavedRecoveryText) {
-      this.saveRecoveryFile(this.currentText);
-      this.lastSavedRecoveryText = this.currentText;
+
+  // 滚动事件：记录位置（模板里原本 @scroll 指向了未定义方法）
+  onScroll(e) {
+    if (e && typeof e.scrollY === 'number') {
+      this.currentScrollTop = e.scrollY;
+      this.scrollTopValue = e.scrollY;
+    }
+  },
+
+  // 滚到窗口顶部：向上翻一段
+  onScrollTop() {
+    if (this.scrollWait) return;
+    this.shiftWindowBackward();
+  },
+
+  // 滚到窗口底部：向下翻一段
+  onScrollBottom() {
+    if (this.scrollWait) return;
+    this.shiftWindowForward();
+  },
+
+  // 窗口向下平移一段：移除顶部段，用其测得高度补偿滚动
+  shiftWindowForward() {
+    const doc = this.__doc;
+    if (!doc || this.winEnd >= doc.chunks.length - 1) return;
+    this.scrollWait = true;
+    const before = this.currentScrollTop;
+    const el = this.$element('chunkWrap0');
+    const finish = (h) => {
+      const nt = Math.max(0, before - (h || 0));
+      // 窗口与滚动量同一次赋值，交给框架合并成一次渲染
+      this.winStart++;
+      this.winEnd++;
+      this.scrollTopValue = nt;
+      this.currentScrollTop = nt;
+      this.refreshSlices();
+      this.$nextTick(() => {
+        setTimeout(() => {
+          const sc = this.$element('textScroll');
+          if (sc) sc.scrollTo({ top: nt, behavior: 'auto' });
+          this.scrollWait = false;
+        }, 60);
+      });
+    };
+    if (el) {
+      el.getBoundingClientRect({
+        success: (rect) => finish(rect.height),
+        fail: () => finish(0)
+      });
+    } else {
+      finish(0);
+    }
+  },
+
+  // 窗口向上平移一段：前插一段，用原首段高度近似补偿滚动
+  shiftWindowBackward() {
+    const doc = this.__doc;
+    if (!doc || this.winStart <= 0) return;
+    this.scrollWait = true;
+    const before = this.currentScrollTop;
+    const el = this.$element('chunkWrap0');
+    const apply = (h) => {
+      const nt = before + (h || 0);
+      // 窗口与滚动量同一次赋值，交给框架合并成一次渲染
+      this.winStart--;
+      this.winEnd--;
+      this.scrollTopValue = nt;
+      this.currentScrollTop = nt;
+      this.refreshSlices();
+      this.$nextTick(() => {
+        setTimeout(() => {
+          const sc = this.$element('textScroll');
+          if (sc) sc.scrollTo({ top: nt, behavior: 'auto' });
+          this.scrollWait = false;
+        }, 60);
+      });
+    };
+    if (el) {
+      el.getBoundingClientRect({
+        success: (rect) => apply(rect.height),
+        fail: () => apply(0)
+      });
+    } else {
+      apply(0);
     }
   },
   
-  // 保存恢复文件
-  saveRecoveryFile(content) {
-    import('../Common/utils.js').then(utils => {
-      // 使用 utils.js 中的专用 recovery 文件函数
-      utils.saveRecoveryFile(content, (err) => {
-        if (err) {
-          console.error("保存恢复文件失败:", err);
-          return;
-        }
-        console.log("恢复文件 recovery.txt 保存成功");
-      });
+  // 检查并保存恢复文件（仅在有改动时）
+  checkAndSaveRecovery() {
+    if (!this.__doc) return;
+    if (!this._recoveryDirty) return;
+    this.saveRecoveryFile();
+  },
+  
+  // 保存恢复文件：逐段 append 写入，避免拼出整串
+  saveRecoveryFile() {
+    if (!this.__doc) return;
+    if (this._recoveryWriting) return;
+    if (this.isSaving) return;
+    this._recoveryWriting = true;
+    writeChunks('internal://files/recovery.txt', this.__doc.chunks, (err) => {
+      this._recoveryWriting = false;
+      if (err) {
+        console.error("保存恢复文件失败:", err);
+        return;
+      }
+      this._recoveryDirty = false;
+      console.log("恢复文件 recovery.txt 保存成功");
     });
   },
   
