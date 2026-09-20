@@ -170,6 +170,8 @@ export function saveNoteFile(noteId, content, callback) {
       text: content,
       success: () => {
         console.log(`笔记文件 note_${noteId}.txt 保存成功`);
+        // whole-file 写入后分段索引失效，删除以便下次按内容重建
+        file.default.delete({ uri: `internal://files/note_${noteId}.txt.idx`, success: () => {}, fail: () => {} });
         if (callback) callback(null);
       },
       fail: (data, code) => {
@@ -265,6 +267,8 @@ export function deleteNoteFile(noteId, callback) {
       uri: `internal://files/note_${noteId}.txt`,
       success: () => {
         console.log(`笔记文件 note_${noteId}.txt 删除成功`);
+        // 顺带清理分段索引文件（不存在则忽略）
+        file.default.delete({ uri: `internal://files/note_${noteId}.txt.idx`, success: () => {}, fail: () => {} });
         if (callback) callback(null);
       },
       fail: (data, code) => {
