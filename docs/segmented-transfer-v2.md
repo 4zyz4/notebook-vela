@@ -40,6 +40,9 @@ internal://files/note_<id>.txt.idx    段表：每段的 byteLen / charLen
 
 Android 收到 `protocol >= 2` 时使用 v2；没有该字段时按旧协议处理。
 
+`createTime` / `modifyTime` 为毫秒时间戳。Android 首页会为每条笔记同时显示这两个时间；
+旧版手环未提供时显示“未记录”。
+
 握手保持不变：
 
 ```json
