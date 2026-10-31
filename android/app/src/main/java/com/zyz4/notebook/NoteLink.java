@@ -122,11 +122,29 @@ public final class NoteLink {
     private Node node;
     private boolean connecting;
     private boolean handshaken;
-    private boolean messageListenerRegistered;
+    private boolean handshakePending;
     private int retryAttempts;
+
+    /**
+     * 每发起一次连接流程递增；旧流程的异步回调发现序号变化后直接丢弃，
+     * 避免用户反复点击连接卡片时多条流程同时走到“注册监听”而重复注册。
+     */
+    private int attemptSeq;
+
+    /** 消息监听按设备节点去重：同一节点只注册一次，失败后允许重试。 */
+    private String messageListenerNodeId;
+    private String messageListenerRegisteringNodeId;
+    private String messageListenerRemovingNodeId;
+    private boolean messageListenerRegistrationPending;
+
+    /** 连接状态订阅同样按节点去重。 */
+    private String connectionSubscribedNodeId;
+    private String connectionSubscribingNodeId;
 
     private final Runnable handshakeTimeoutRunnable = () -> {
         if (!handshaken) {
+            // 握手超时可能意味着 SDK 侧监听已失效，先注销，重试时再干净地注册一次。
+            dropMessageListenerRegistration();
             failConnection("连接超时，请确认手环已打开笔记本应用");
         }
     };
@@ -143,7 +161,13 @@ public final class NoteLink {
         @Override
         public void onMessageReceived(@NonNull String nodeId, @NonNull byte[] message) {
             String raw = new String(message, StandardCharsets.UTF_8);
-            main.post(() -> handleRawMessage(raw));
+            main.post(() -> {
+                Node current = node;
+                if (current != null && nodeId != null && !nodeId.equals(current.id)) {
+                    return;
+                }
+                handleRawMessage(raw);
+            });
         }
     };
 
@@ -152,7 +176,7 @@ public final class NoteLink {
         public void onDataChanged(@NonNull String nodeId,
                                   @NonNull DataItem dataItem,
                                   @NonNull DataSubscribeResult data) {
-            main.post(() -> handleDataChanged(dataItem, data));
+            main.post(() -> handleDataChanged(nodeId, dataItem, data));
         }
     };
 
@@ -208,6 +232,10 @@ public final class NoteLink {
      */
     public void retry() {
         main.post(() -> {
+            // 正在连接时忽略重复点击：否则会并发出多条连接流程，重复注册监听。
+            if (connecting || state == State.CONNECTING) {
+                return;
+            }
             main.removeCallbacks(retryRunnable);
             main.removeCallbacks(handshakeTimeoutRunnable);
             retryAttempts = 0;
@@ -302,6 +330,12 @@ public final class NoteLink {
                     Log.w(TAG, "unsubscribe failed", e);
                 }
             }
+            messageListenerNodeId = null;
+            messageListenerRegisteringNodeId = null;
+            messageListenerRemovingNodeId = null;
+            messageListenerRegistrationPending = false;
+            connectionSubscribedNodeId = null;
+            connectionSubscribingNodeId = null;
             failPending("应用退出");
             listeners.clear();
             ioExecutor.shutdown();
@@ -318,10 +352,14 @@ public final class NoteLink {
             return;
         }
         connecting = true;
+        final int attempt = ++attemptSeq;
         setState(State.CONNECTING, "正在查找手环");
         try {
             nodeApi.getConnectedNodes()
                     .addOnSuccessListener(nodes -> main.post(() -> {
+                        if (!isCurrentAttempt(attempt)) {
+                            return;
+                        }
                         connecting = false;
                         if (nodes == null || nodes.isEmpty()) {
                             failConnection("设备未连接");
@@ -329,9 +367,12 @@ public final class NoteLink {
                         }
                         node = nodes.get(0);
                         currentNodeName = node.name;
-                        checkPermissions();
+                        checkPermissions(attempt);
                     }))
                     .addOnFailureListener(e -> main.post(() -> {
+                        if (!isCurrentAttempt(attempt)) {
+                            return;
+                        }
                         connecting = false;
                         failConnection("获取设备失败: " + safeMessage(e));
                     }));
@@ -341,7 +382,10 @@ public final class NoteLink {
         }
     }
 
-    private void checkPermissions() {
+    private void checkPermissions(int attempt) {
+        if (!isCurrentAttempt(attempt)) {
+            return;
+        }
         if (node == null) {
             failConnection("设备节点为空");
             return;
@@ -350,35 +394,56 @@ public final class NoteLink {
         try {
             authApi.checkPermissions(node.id, permissions)
                     .addOnSuccessListener(results -> main.post(() -> {
+                        if (!isCurrentAttempt(attempt)) {
+                            return;
+                        }
                         if (results != null && results.length > 0 && results[0]) {
-                            afterPermission();
+                            afterPermission(attempt);
                         } else {
-                            requestPermission(permissions);
+                            requestPermission(attempt, permissions);
                         }
                     }))
-                    .addOnFailureListener(e -> main.post(() ->
-                            failConnection("权限查询失败: " + safeMessage(e))));
+                    .addOnFailureListener(e -> main.post(() -> {
+                        if (!isCurrentAttempt(attempt)) {
+                            return;
+                        }
+                        failConnection("权限查询失败: " + safeMessage(e));
+                    }));
         } catch (Exception e) {
             failConnection("权限查询异常: " + safeMessage(e));
         }
     }
 
-    private void requestPermission(Permission[] permissions) {
+    private void requestPermission(int attempt, Permission[] permissions) {
+        if (!isCurrentAttempt(attempt)) {
+            return;
+        }
         if (node == null) {
             failConnection("设备节点为空");
             return;
         }
         try {
             authApi.requestPermission(node.id, permissions)
-                    .addOnSuccessListener(granted -> main.post(this::afterPermission))
-                    .addOnFailureListener(e -> main.post(() ->
-                            failConnection("权限申请失败: " + safeMessage(e))));
+                    .addOnSuccessListener(granted -> main.post(() -> {
+                        if (isCurrentAttempt(attempt)) {
+                            afterPermission(attempt);
+                        }
+                    }))
+                    .addOnFailureListener(e -> main.post(() -> {
+                        if (!isCurrentAttempt(attempt)) {
+                            return;
+                        }
+                        failConnection("权限申请失败: " + safeMessage(e));
+                    }));
         } catch (Exception e) {
             failConnection("权限申请异常: " + safeMessage(e));
         }
     }
 
-    private void afterPermission() {
+    private void afterPermission(int attempt) {
+        if (!isCurrentAttempt(attempt)) {
+            return;
+        }
         if (node == null) {
             failConnection("设备节点为空");
             return;
@@ -386,6 +451,9 @@ public final class NoteLink {
         try {
             nodeApi.isWearAppInstalled(node.id)
                     .addOnSuccessListener(installed -> main.post(() -> {
+                        if (!isCurrentAttempt(attempt)) {
+                            return;
+                        }
                         if (!Boolean.TRUE.equals(installed)) {
                             state = State.APP_NOT_INSTALLED;
                             stateDescription = "请在手环上安装笔记应用";
@@ -394,10 +462,14 @@ public final class NoteLink {
                             return;
                         }
                         subscribeConnectionState();
-                        registerMessageListener();
+                        registerMessageListener(attempt);
                     }))
-                    .addOnFailureListener(e -> main.post(() ->
-                            failConnection("检查手环应用失败: " + safeMessage(e))));
+                    .addOnFailureListener(e -> main.post(() -> {
+                        if (!isCurrentAttempt(attempt)) {
+                            return;
+                        }
+                        failConnection("检查手环应用失败: " + safeMessage(e));
+                    }));
         } catch (Exception e) {
             failConnection("检查手环应用异常: " + safeMessage(e));
         }
@@ -407,40 +479,134 @@ public final class NoteLink {
         if (node == null) {
             return;
         }
+        final String nodeId = node.id;
+        // 同一节点只订阅一次：重复订阅会让同一个状态变化回调多次。
+        if (nodeId.equals(connectionSubscribedNodeId)
+                || nodeId.equals(connectionSubscribingNodeId)) {
+            return;
+        }
+        connectionSubscribingNodeId = nodeId;
         try {
-            nodeApi.subscribe(node.id, DataItem.ITEM_CONNECTION, dataListener)
-                    .addOnFailureListener(e -> Log.w(TAG, "subscribe connection failed", e));
+            nodeApi.subscribe(nodeId, DataItem.ITEM_CONNECTION, dataListener)
+                    .addOnSuccessListener(v -> main.post(() -> {
+                        connectionSubscribingNodeId = null;
+                        connectionSubscribedNodeId = nodeId;
+                    }))
+                    .addOnFailureListener(e -> main.post(() -> {
+                        connectionSubscribingNodeId = null;
+                        Log.w(TAG, "subscribe connection failed", e);
+                    }));
         } catch (Exception e) {
+            connectionSubscribingNodeId = null;
             Log.w(TAG, "subscribe connection exception", e);
         }
     }
 
-    private void registerMessageListener() {
+    private void registerMessageListener(int attempt) {
         if (node == null) {
-            failConnection("设备节点为空");
+            if (isCurrentAttempt(attempt)) {
+                failConnection("设备节点为空");
+            }
             return;
         }
-        if (messageListenerRegistered) {
-            startHandshake();
+        final String nodeId = node.id;
+        if (nodeId.equals(messageListenerNodeId)) {
+            if (isCurrentAttempt(attempt)) {
+                startHandshake();
+            }
             return;
         }
+        // 已有注册请求在途：等它的回调统一触发握手，避免并发 addListener。
+        if (nodeId.equals(messageListenerRegisteringNodeId)) {
+            return;
+        }
+        // 正在注销：等注销完成后再注册，避免 remove/add 交错后又残留多份监听。
+        if (nodeId.equals(messageListenerRemovingNodeId)) {
+            messageListenerRegistrationPending = true;
+            return;
+        }
+        messageListenerRegisteringNodeId = nodeId;
         try {
-            messageApi.addListener(node.id, messageListener)
+            messageApi.addListener(nodeId, messageListener)
                     .addOnSuccessListener(v -> main.post(() -> {
-                        messageListenerRegistered = true;
-                        startHandshake();
+                        messageListenerRegisteringNodeId = null;
+                        messageListenerNodeId = nodeId;
+                        Node current = node;
+                        if (current == null || !nodeId.equals(current.id)) {
+                            return;
+                        }
+                        if (isCurrentAttempt(attempt)) {
+                            startHandshake();
+                        } else {
+                            // 注册发生在旧流程中：让当前流程接着走握手。
+                            registerMessageListener(attemptSeq);
+                        }
                     }))
-                    .addOnFailureListener(e -> main.post(() ->
-                            failConnection("注册消息监听失败: " + safeMessage(e))));
+                    .addOnFailureListener(e -> main.post(() -> {
+                        messageListenerRegisteringNodeId = null;
+                        Node current = node;
+                        if (current == null || !nodeId.equals(current.id)) {
+                            return;
+                        }
+                        if (isCurrentAttempt(attempt)) {
+                            failConnection("注册消息监听失败: " + safeMessage(e));
+                        } else {
+                            // 当前流程可能正等待这次注册结果，重新发起一次。
+                            registerMessageListener(attemptSeq);
+                        }
+                    }));
         } catch (Exception e) {
+            messageListenerRegisteringNodeId = null;
             failConnection("注册消息监听异常: " + safeMessage(e));
         }
     }
 
-    private void startHandshake() {
-        if (node == null) {
+    /** 注销当前节点的消息监听；成功后允许下一次流程重新注册且只注册一份。 */
+    private void dropMessageListenerRegistration() {
+        final String nodeId = messageListenerNodeId;
+        if (nodeId == null || messageListenerRegisteringNodeId != null) {
             return;
         }
+        messageListenerNodeId = null;
+        messageListenerRemovingNodeId = nodeId;
+        try {
+            messageApi.removeListener(nodeId)
+                    .addOnSuccessListener(v -> main.post(() -> onMessageListenerRemoved(nodeId)))
+                    .addOnFailureListener(e -> main.post(() -> {
+                        Log.w(TAG, "remove message listener failed", e);
+                        // 注销失败时保守地认为旧监听仍然有效，避免重复注册。
+                        if (nodeId.equals(messageListenerRemovingNodeId)) {
+                            messageListenerRemovingNodeId = null;
+                            messageListenerNodeId = nodeId;
+                            messageListenerRegistrationPending = false;
+                        }
+                    }));
+        } catch (Exception e) {
+            Log.w(TAG, "remove message listener exception", e);
+            messageListenerRemovingNodeId = null;
+            messageListenerNodeId = nodeId;
+            messageListenerRegistrationPending = false;
+        }
+    }
+
+    private void onMessageListenerRemoved(String nodeId) {
+        if (!nodeId.equals(messageListenerRemovingNodeId)) {
+            return;
+        }
+        messageListenerRemovingNodeId = null;
+        if (messageListenerRegistrationPending) {
+            messageListenerRegistrationPending = false;
+            if (node != null) {
+                registerMessageListener(attemptSeq);
+            }
+        }
+    }
+
+    private void startHandshake() {
+        if (node == null || handshakePending) {
+            return;
+        }
+        handshakePending = true;
         handshaken = false;
         setState(State.CONNECTING, "正在与手环握手");
         sendRaw(NoteProtocol.handshake(0));
@@ -452,6 +618,7 @@ public final class NoteLink {
         Log.w(TAG, "connection failed: " + message);
         connecting = false;
         handshaken = false;
+        handshakePending = false;
         setState(State.FAILED, message);
         scheduleRetry();
     }
@@ -468,7 +635,10 @@ public final class NoteLink {
     private void resetSession(boolean failTasks) {
         connecting = false;
         handshaken = false;
-        messageListenerRegistered = false;
+        handshakePending = false;
+        // 使仍在途的旧流程回调失效，避免它们继续注册监听。
+        attemptSeq++;
+        messageListenerRegistrationPending = false;
         node = null;
         currentNodeName = null;
         main.removeCallbacks(handshakeTimeoutRunnable);
@@ -477,22 +647,32 @@ public final class NoteLink {
         }
     }
 
-    private void handleDataChanged(DataItem item, DataSubscribeResult data) {
+    private boolean isCurrentAttempt(int attempt) {
+        return attempt == attemptSeq;
+    }
+
+    private void handleDataChanged(String nodeId, DataItem item, DataSubscribeResult data) {
         if (item == null || data == null) {
+            return;
+        }
+        Node current = node;
+        if (current != null && nodeId != null && !nodeId.equals(current.id)) {
             return;
         }
         if (item.getType() == DataItem.ITEM_CONNECTION.getType()) {
             int status = data.getConnectedStatus();
             if (status == DataSubscribeResult.RESULT_CONNECTION_DISCONNECTED) {
                 handshaken = false;
-                messageListenerRegistered = false;
+                handshakePending = false;
+                // 监听器已在 SDK 侧注册，重连时复用，重复 addListener 会产生多份回调。
                 setState(State.DISCONNECTED, "手环连接已断开");
                 failPending("手环连接已断开");
                 scheduleRetry();
             } else if (status == DataSubscribeResult.RESULT_CONNECTION_CONNECTED) {
                 if (!handshaken) {
-                    if (messageListenerRegistered) {
-                        startHandshake();
+                    if (current != null && messageListenerNodeId != null
+                            && messageListenerNodeId.equals(current.id)) {
+                        registerMessageListener(attemptSeq);
                     } else {
                         doConnect();
                     }
@@ -544,6 +724,7 @@ public final class NoteLink {
                 || NoteProtocol.TYPE_CREATE_SUCCESS.equals(type)
                 || NoteProtocol.TYPE_FULL_RESPONSE.equals(type))) {
             handshaken = true;
+            handshakePending = false;
             main.removeCallbacks(handshakeTimeoutRunnable);
             setState(State.CONNECTED, null);
         }
@@ -696,6 +877,7 @@ public final class NoteLink {
             return;
         }
         handshaken = true;
+        handshakePending = false;
         connecting = false;
         main.removeCallbacks(handshakeTimeoutRunnable);
         setState(State.CONNECTED, null);
