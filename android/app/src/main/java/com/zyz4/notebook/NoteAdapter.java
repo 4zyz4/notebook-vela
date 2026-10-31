@@ -1,5 +1,6 @@
 package com.zyz4.notebook;
 
+import android.content.Context;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
@@ -60,7 +61,11 @@ public final class NoteAdapter extends RecyclerView.Adapter<NoteAdapter.Holder> 
             preview = preview.substring(0, 32) + "...";
         }
         holder.content.setText(preview);
-        holder.time.setText(formatTime(note));
+        Context context = holder.itemView.getContext();
+        holder.createTime.setText(context.getString(
+                R.string.note_create_time, formatTime(context, note.createTime)));
+        holder.modifyTime.setText(context.getString(
+                R.string.note_modify_time, formatTime(context, note.modifyTime)));
         holder.itemView.setOnClickListener(v -> listener.onOpen(note));
         holder.delete.setOnClickListener(v -> listener.onDelete(note));
     }
@@ -70,23 +75,24 @@ public final class NoteAdapter extends RecyclerView.Adapter<NoteAdapter.Holder> 
         return notes.size();
     }
 
-    private String formatTime(NotePreview note) {
-        long time = note.modifyTime > 0 ? note.modifyTime : note.createTime;
+    private String formatTime(Context context, long time) {
         if (time <= 0) {
-            return "";
+            return context.getString(R.string.time_unknown);
         }
         return timeFormat.format(new Date(time));
     }
 
     static final class Holder extends RecyclerView.ViewHolder {
         final TextView content;
-        final TextView time;
+        final TextView createTime;
+        final TextView modifyTime;
         final ImageButton delete;
 
         Holder(@NonNull View itemView) {
             super(itemView);
             content = itemView.findViewById(R.id.noteContent);
-            time = itemView.findViewById(R.id.noteTime);
+            createTime = itemView.findViewById(R.id.noteCreateTime);
+            modifyTime = itemView.findViewById(R.id.noteModifyTime);
             delete = itemView.findViewById(R.id.deleteButton);
         }
     }
