@@ -14,5 +14,32 @@
         <item name="android:windowLightStatusBar">false</item>
         <item name="android:windowLightNavigationBar">false</item>
         <item name="android:windowLayoutInDisplayCutoutMode">never</item>
+        <!-- 对话框单独配色：按钮文字不能被 colorPrimary（深灰）带成深色 -->
+        <item name="alertDialogTheme">@style/ThemeOverlay.Notebook.Dialog.Alert</item>
+        <item name="materialAlertDialogTheme">@style/ThemeOverlay.Notebook.MaterialAlertDialog</item>
+    </style>
+
+    <!-- androidx.appcompat.app.AlertDialog -->
+    <style name="ThemeOverlay.Notebook.Dialog.Alert" parent="ThemeOverlay.MaterialComponents.Dialog.Alert">
+        <item name="colorPrimary">@color/dialog_accent</item>
+        <item name="colorAccent">@color/dialog_accent</item>
+        <item name="colorSurface">@color/card_bg</item>
+        <item name="colorOnSurface">@color/text_main</item>
+        <item name="colorBackgroundFloating">@color/card_bg</item>
+        <item name="android:colorBackgroundFloating">@color/card_bg</item>
+        <item name="android:textColorPrimary">@color/text_main</item>
+        <item name="android:textColorSecondary">@color/text_sub</item>
+    </style>
+
+    <!-- MaterialAlertDialogBuilder（当前未使用，保持配色一致） -->
+    <style name="ThemeOverlay.Notebook.MaterialAlertDialog" parent="ThemeOverlay.MaterialComponents.MaterialAlertDialog">
+        <item name="colorPrimary">@color/dialog_accent</item>
+        <item name="colorAccent">@color/dialog_accent</item>
+        <item name="colorSurface">@color/card_bg</item>
+        <item name="colorOnSurface">@color/text_main</item>
+        <item name="colorBackgroundFloating">@color/card_bg</item>
+        <item name="android:colorBackgroundFloating">@color/card_bg</item>
+        <item name="android:textColorPrimary">@color/text_main</item>
+        <item name="android:textColorSecondary">@color/text_sub</item>
     </style>
 </resources>
