@@ -56,6 +56,8 @@ export default {
     loading: false,
     showLoading: false,
     navigationTimer: null,
+    // 加载序号：防止并发 loadNotes 的旧结果覆盖新结果（旧结果可能仍带恢复笔记）
+    _loadSeq: 0,
     timeDisplayType: 'createTime', // 从设置中读取
     timeUpdateTimer: null,
     currentTime: '', // 添加当前时间变量
@@ -508,8 +510,15 @@ export default {
     // 显示加载提示
     this.loading = true;
 
+    // 每次加载分配一个序号，异步回调返回时若已不是最新一次加载则丢弃，
+    // 避免较早发起、较晚返回的读取结果把刚清除的恢复笔记又写回列表
+    const loadSeq = (this._loadSeq || 0) + 1;
+    this._loadSeq = loadSeq;
+    const isStale = () => loadSeq !== this._loadSeq;
+
     import('../Common/utils.js').then(utils => {
       utils.readMetadata((err, metadata) => {
+        if (isStale()) return;
         if (err) {
           console.log("读取元数据失败:", err);
           this.notes = [];
@@ -537,6 +546,7 @@ export default {
 
         // 先检查 recovery.txt 是否有内容
         utils.readRecoveryFile((recoveryErr, recoveryContent) => {
+          if (isStale()) return;
           let hasRecovery = false;
           if (!recoveryErr && recoveryContent && recoveryContent.trim() !== '') {
             hasRecovery = true;
@@ -573,6 +583,7 @@ export default {
           noteEntries.forEach((noteEntry, index) => {
             // 列表只需预览，读取头部字节即可，避免为预览读入整篇
             utils.readNoteFileHead(noteEntry.id, 96, (err, content) => {
+              if (isStale()) return;
               loadedCount++;
 
               // 调整索引，因为前面可能插入了恢复笔记
@@ -610,6 +621,7 @@ export default {
         });
       });
     }).catch(err => {
+      if (isStale()) return;
       console.error("导入工具模块失败:", err);
       this.notes = [];
       this.loading = false;
@@ -724,6 +736,9 @@ export default {
     
     // 如果是恢复的笔记
     if (note.recovery) {
+      // 先从列表移除蓝色恢复项，避免编辑页清理完成前仍能看到它；
+      // 若编辑页保存失败，返回时 onShow 重新加载会再次显示
+      this.notes = this.notes.filter(n => !n.recovery);
       // 跳转到编辑页面，传递恢复的内容和标记
       this.navigationTimer = setTimeout(() => {
         router.push({

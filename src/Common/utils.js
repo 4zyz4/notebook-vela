@@ -422,12 +422,31 @@ export function clearRecoveryFile(callback) {
       });
     };
 
+    // 删除后回读确认：某些情况下删除回调成功但文件仍可读到内容，
+    // 此时写空兜底，确保 index 不会再把它识别为恢复笔记
+    const verifyCleared = () => {
+      file.default.readText({
+        uri: 'internal://files/recovery.txt',
+        success: (result) => {
+          if (result && typeof result.text === 'string' && result.text.trim() !== '') {
+            console.log('恢复笔记文件删除后仍有内容，改为清空');
+            blankOut();
+          } else {
+            console.log('恢复笔记文件 recovery.txt 删除成功');
+            if (callback) callback(null);
+          }
+        },
+        fail: () => {
+          // 读不到说明文件已不存在，视为清除成功
+          console.log('恢复笔记文件 recovery.txt 删除成功');
+          if (callback) callback(null);
+        }
+      });
+    };
+
     file.default.delete({
       uri: 'internal://files/recovery.txt',
-      success: () => {
-        console.log('恢复笔记文件 recovery.txt 删除成功');
-        if (callback) callback(null);
-      },
+      success: verifyCleared,
       fail: (data, code) => {
         // 文件本就不存在或删除失败：退化为清空
         console.log(`删除恢复笔记文件失败，改为清空: ${code}`, data);

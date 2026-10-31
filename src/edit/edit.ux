@@ -266,6 +266,12 @@ export default {
     // 恢复文件脏标记（避免每 10s 反复写整篇）
     _recoveryDirty: false,
     _recoveryWriting: false,
+    // 清除恢复文件期间禁止新写入；离开页面后彻底停止写入，
+    // 避免“在途写入”在删除完成之后又把 recovery.txt 创建出来
+    _recoveryClearing: false,
+    _recoveryStopped: false,
+    _recoveryClearSeq: 0,
+    _recoveryWriteWaiters: [],
 
     // 用于保存原始笔记ID，确保编辑时始终指向正确的笔记
     originalNoteId: null,
@@ -832,8 +838,9 @@ export default {
   back() {
     // 检查笔记是否已保存或者内容为空
     if (this.isSaved || this.textLength() === 0) {
-      // 清除恢复文件完成后再返回，避免 index 读到残留恢复文件
-      this.clearRecoveryFileThen(() => router.back());
+      // 清除恢复文件完成后再返回，避免 index 读到残留恢复文件；
+      // 离开页面后不再写入，防止在途写入把文件“复活”
+      this.clearRecoveryFileThen(() => router.back(), true);
     } else {
       // 如果未保存且有内容，则显示确认对话框
       this.showExitConfirm = true;
@@ -1002,9 +1009,10 @@ export default {
       this.updateInputState(true);
       
       // 保存成功后清除恢复文件，再通知 index 刷新，避免 index 读到残留恢复文件
+      // 页面仍会继续编辑，因此这里不永久停止恢复写入
       this.clearRecoveryFileThen(() => {
         notifyNotesChange();
-      });
+      }, false);
       
       //计算safe-area大小
       this.$nextTick(function () { 
@@ -1134,7 +1142,7 @@ export default {
       setTimeout(() => {
         router.back();
       }, 500);
-    });
+    }, true);
   },
   
   // 取消退出
@@ -1147,7 +1155,7 @@ export default {
   confirmExit() {
     this.showExitConfirm = false;
     // 清除恢复文件完成后再返回，避免 index 读到残留恢复文件
-    this.clearRecoveryFileThen(() => router.back());
+    this.clearRecoveryFileThen(() => router.back(), true);
   },
   
   // 滚动到底部：仅当光标在末尾且位于当前窗口内
@@ -1281,6 +1289,7 @@ export default {
   // 检查并保存恢复文件（仅在有改动时）
   checkAndSaveRecovery() {
     if (!this.__doc) return;
+    if (this._recoveryStopped || this._recoveryClearing) return;
     if (!this._recoveryDirty) return;
     this.saveRecoveryFile();
   },
@@ -1288,49 +1297,88 @@ export default {
   // 保存恢复文件：流式写入（脏段取内存、干净段从笔记文件读回）
   saveRecoveryFile() {
     if (!this.__doc) return;
+    if (this._recoveryStopped || this._recoveryClearing) return;
     if (this._recoveryWriting) return;
     if (this.isSaving) return;
     this._recoveryWriting = true;
+    // 开始写入前清脏：写入期间的新改动会重新置脏，不会被本次完成回调误清
+    this._recoveryDirty = false;
+    const seq = this._recoveryClearSeq;
     writeDocToUri(this.__doc, 'internal://files/recovery.txt', (err) => {
       this._recoveryWriting = false;
       if (err) {
         console.error("保存恢复文件失败:", err);
-        return;
+        // 写入期间没有发起清除时保留脏标记，下次重试
+        if (seq === this._recoveryClearSeq) this._recoveryDirty = true;
+      } else {
+        console.log("恢复文件 recovery.txt 保存成功");
       }
-      this._recoveryDirty = false;
-      console.log("恢复文件 recovery.txt 保存成功");
+      // 若有清除流程在等待这次写入结束，立即执行删除
+      this.flushRecoveryWriteWaiters();
+    });
+  },
+
+  // 唤醒等待“在途恢复写入结束”的清除流程
+  flushRecoveryWriteWaiters() {
+    const waiters = this._recoveryWriteWaiters || [];
+    this._recoveryWriteWaiters = [];
+    waiters.forEach((fn) => {
+      try {
+        fn();
+      } catch (e) {
+        console.error('恢复文件清除等待回调出错:', e);
+      }
     });
   },
   
   // 清除恢复文件完成后再执行回调，确保异步删除完成后再离开页面/刷新，
   // 避免 index 在 onShow 时读到尚未删除的恢复文件而残留“恢复的笔记”。
-  clearRecoveryFileThen(done) {
+  // stop 为 true 时表示即将离开页面/删除笔记，此后不再写恢复文件，
+  // 防止在途写入或后续定时器把已删除的 recovery.txt 重新创建出来。
+  clearRecoveryFileThen(done, stop) {
+    if (stop) this._recoveryStopped = true;
+    this._recoveryClearing = true;
+    // 让所有已开始的恢复写入失效（完成时不再更新脏标记）
+    this._recoveryClearSeq++;
+    this._recoveryDirty = false;
+
     let finished = false;
     const finish = () => {
       if (finished) return;
       finished = true;
+      this._recoveryClearing = false;
       if (typeof done === 'function') done();
     };
     // 兜底：文件模块异常时也不能阻塞离开页面
-    setTimeout(finish, 1000);
-    import('../Common/utils.js').then(utils => {
-      utils.clearRecoveryFile((err) => {
-        if (err) {
-          console.error("清除恢复文件失败:", err);
-        } else {
-          console.log("恢复文件 recovery.txt 清除成功");
-        }
+    setTimeout(finish, 3000);
+
+    const doClear = () => {
+      import('../Common/utils.js').then(utils => {
+        utils.clearRecoveryFile((err) => {
+          if (err) {
+            console.error("清除恢复文件失败:", err);
+          } else {
+            console.log("恢复文件 recovery.txt 清除成功");
+          }
+          finish();
+        });
+      }).catch((err) => {
+        console.error("清除恢复文件时发生异常:", err);
         finish();
       });
-    }).catch((err) => {
-      console.error("清除恢复文件时发生异常:", err);
-      finish();
-    });
+    };
+
+    // 有在途写入时先等它结束再删除，否则删除后会被这次写入重新创建
+    if (this._recoveryWriting) {
+      this._recoveryWriteWaiters.push(doClear);
+    } else {
+      doClear();
+    }
   },
   
   // 清除恢复文件（不等待结果，用于页面销毁等兜底场景）
   clearRecoveryFile() {
-    this.clearRecoveryFileThen();
+    this.clearRecoveryFileThen(null, true);
   },
 }
 </script>
