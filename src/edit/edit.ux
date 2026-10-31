@@ -226,15 +226,13 @@
 import router from '@system.router'
 import prompt from '@system.prompt'
 import vibrator from '@system.vibrator'
-import {notifyNotesChange, getCachedSettings, getCachedSettingsSync } from '../Common/utils.js'
-import { createDocFromText, openDoc, getRange, insertText, deleteBackward, prevCharPos, nextCharPos, locate, materialize, writeDocToUri, commitDoc, loadRange, setWindow, isLoaded } from '../Common/textSegments.js'
-
-// 调试用：单段字节长度（正式值为 512，调小便于观察分段/翻段行为）
-const SEG_BYTES = 128
+import {notifyNotesChange, getCachedSettings, getCachedSettingsSync, normalizeSegBytes } from '../Common/utils.js'
+import { createDocFromText, openDoc, getRange, insertText, deleteBackward, prevCharPos, nextCharPos, locate, materialize, writeDocToUri, commitDoc, loadRange, setWindow, isLoaded, DEFAULT_SEG_BYTES } from '../Common/textSegments.js'
 
 export default {
-  // 非响应式实例属性：分段文档、滚动节流标记、上次渲染的内容高度
+  // 非响应式实例属性：分段文档、分段长度、滚动节流标记、上次渲染的内容高度
   __doc: null,
+  __segBytes: DEFAULT_SEG_BYTES,
   __scrollScheduled: false,
   __contentHeight: -1,
 
@@ -321,10 +319,6 @@ export default {
 
   onInit() {
     try {
-      // 先应用设置：正常路径下 index 页已把设置写入 global 缓存，这里同步拿到，
-      // 首次渲染就是真实设置；极端情况（缓存未建立）才显示“加载中”并异步读取
-      this.initSettings();
-
       // 设置创建时间为打开页面的时间
       this.createTime = Date.now();
 
@@ -339,22 +333,37 @@ export default {
       // 启动主定时器
       this.startMainTimer();
 
-      // 初始化分段文档（既有笔记会异步从磁盘按字节分段读取）
-      this.initDoc();
+      // 先应用设置再建分段文档：正常路径下 index 页已把设置写入 global 缓存，
+      // 这里同步拿到，首次渲染就是真实设置；极端情况（缓存未建立）才显示
+      // “加载中”并异步读取，读到后再按设置中的分段长度打开笔记。
+      this.initSettings(() => {
+        try {
+          // 初始化分段文档（既有笔记会异步从磁盘按字节分段读取）
+          this.initDoc();
+        } catch (e) {
+          console.error('初始化分段文档时出错:', e);
+          this.__doc = createDocFromText('', this.__segBytes, '');
+          this.afterDocReady();
+        }
+      });
     } catch (e) {
       console.error('初始化页面时出错:', e);
-      this.__doc = createDocFromText('', SEG_BYTES, '');
+      this.__doc = createDocFromText('', DEFAULT_SEG_BYTES, '');
       this.hideInput = false;
       this.settingsLoading = false;
     }
   },
 
   // 应用设置：优先用跨页面缓存同步完成，正常情况下不会出现加载遮罩
-  initSettings() {
+  initSettings(done) {
+    const finish = () => {
+      if (typeof done === 'function') done();
+    };
     const cached = getCachedSettingsSync();
     if (cached) {
       this.applySettings(cached);
       this.settingsLoading = false;
+      finish();
       return;
     }
 
@@ -378,6 +387,7 @@ export default {
       }
       clearTimeout(timer);
       hideOverlay();
+      finish();
     });
   },
 
@@ -387,24 +397,25 @@ export default {
     this.borderWidth = settings.borderWidth || '10px';
     this.autoScrollType = settings.autoScrollType || 'oneBlank';
     this.keyboardLayout = settings.keyboardLayout === 'T9' ? 'T9' : 'QWERTY';
+    this.__segBytes = normalizeSegBytes(settings.segBytes);
   },
 
   // ===== 分段文档 =====
   initDoc() {
     // 恢复笔记：全文已在内存，直接建文档
     if (this.fromRecovery) {
-      this.__doc = createDocFromText(this.content || '', SEG_BYTES, '');
+      this.__doc = createDocFromText(this.content || '', this.__segBytes, '');
       this.afterDocReady();
       return;
     }
     // 编辑既有笔记：只读段表（idx），段文本按需读取
     if (this.noteId) {
-      openDoc(`internal://files/note_${this.noteId}.txt`, SEG_BYTES, (err, doc) => {
+      openDoc(`internal://files/note_${this.noteId}.txt`, this.__segBytes, (err, doc) => {
         if (err || !doc) {
           // 读取失败绝不能当成空笔记：否则用户继续输入并保存会覆盖原内容
           console.error('打开笔记失败:', err);
           this.loadFailed = true;
-          this.__doc = createDocFromText('', SEG_BYTES, '');
+          this.__doc = createDocFromText('', this.__segBytes, '');
           prompt.showToast({ message: '笔记读取失败，请返回重试' });
         } else {
           this.__doc = doc;
@@ -414,7 +425,7 @@ export default {
       return;
     }
     // 新笔记
-    this.__doc = createDocFromText(this.content || '', SEG_BYTES, '');
+    this.__doc = createDocFromText(this.content || '', this.__segBytes, '');
     this.afterDocReady();
   },
 

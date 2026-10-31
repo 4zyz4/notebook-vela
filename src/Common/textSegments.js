@@ -2,13 +2,17 @@
 // 真正的分段：段文本不常驻内存，渲染时按需从磁盘读取当前窗口内的段，
 // 编辑只加载受影响的段，保存时流式重写（脏段取内存、干净段从旧文件读回）。
 // 段表（每段字节数/字符数）记在 note_<id>.txt.idx，打开时 O(1)；
-// 若索引缺失或失效，则扫描一遍文件重建段表（只记元数据、不驻留文本）。
+// 段表固定按 128 字节基准段记录，设置中的 256/512/768 段长打开时合并得到，
+// 所以修改分段长度不需要重新扫描文件。若索引缺失或失效，才扫描文件重建。
 //
 // 文件仍是纯 UTF-8 文本，保证 index 预览、互连读整篇、二维码等旧路径不受影响。
 // 手机分片上传落盘时使用 importTextFile：先扫描临时文件建段表，再流式写入正式笔记，
 // 因此大笔记不会在手表端被拼成一整串。
 
-export const DEFAULT_SEG_BYTES = 128
+export const BASE_SEG_BYTES = 128
+// 默认逻辑段长；必须是 BASE_SEG_BYTES 的整数倍（设置页提供 256/512/768）。
+// idx 始终按 BASE_SEG_BYTES 记录，逻辑段在打开时由基准段合并而来。
+export const DEFAULT_SEG_BYTES = 256
 // 一个段至少要能装下最宽的 UTF-8 字符（4 字节），否则段表无法推进
 const MIN_SEG_BYTES = 4
 
@@ -272,14 +276,23 @@ function idxUriOf(uri) {
   return uri + '.idx'
 }
 
-function writeIdx(doc, info) {
+// 写索引：无论设置的分段长度是多少，.idx 一律按 BASE_SEG_BYTES 记录。
+// 256/512/768 都是它的整数倍，打开时只合并基准段就能得到逻辑段，
+// 因此修改分段长度不需要重新扫描笔记文件。
+// baseSegs 由写盘流程顺带算出；扫描重建时由 scanFile 直接传入。
+function writeIdx(doc, info, baseSegs) {
   if (!doc || !doc.uri) return
+  const base = baseSegs || doc.__baseSegs
+  if (!Array.isArray(base)) {
+    console.warn('缺少基准段信息，跳过写索引（下次打开会重建）:', doc.idxUri)
+    return
+  }
   const payload = JSON.stringify({
-    v: 1,
-    segBytes: doc.segBytes,
+    v: 2,
+    unit: BASE_SEG_BYTES,
     totalBytes: doc.totalBytes,
     mtime: (info && info.lastModifiedTime) || 0,
-    segs: doc.segments.map((s) => [s.byteLen, s.charLen]),
+    segs: base.map((s) => (Array.isArray(s) ? s : [s.byteLen, s.charLen])),
   })
   importFile()
     .then((f) => {
@@ -295,7 +308,8 @@ function writeIdx(doc, info) {
     })
 }
 
-// 打开笔记：优先读 idx 建段表，否则扫描文件重建
+// 打开笔记：优先读 idx 建段表，否则扫描文件重建。
+// idx 里是 128 字节基准段，按当前设置的段长合并成逻辑段。
 export function openDoc(uri, segBytes, callback) {
   const limit = normSegBytes(segBytes)
   importFile()
@@ -312,9 +326,9 @@ export function openDoc(uri, segBytes, callback) {
           f.readText({
             uri: idxUriOf(uri),
             success: (res) => {
-              const segs = parseIdx(res && res.text, limit, size, info && info.lastModifiedTime)
+              const segs = parseIdx(res && res.text, size, info && info.lastModifiedTime)
               if (segs) {
-                doc.segments = segs
+                doc.segments = groupBaseSegments(segs, limit)
                 reindex(doc)
                 if (callback) callback(null, doc)
               } else {
@@ -340,12 +354,36 @@ export function openDoc(uri, segBytes, callback) {
     })
 }
 
-function parseIdx(text, segBytes, size, mtime) {
+// 把索引中的 128 字节基准段按设置合并成逻辑段（贪心：能放进 limit 就放）。
+// 基准段边界天然落在字符边界上，合并不会切开 UTF-8 字符。
+export function groupBaseSegments(baseSegs, segBytes) {
+  const limit = normSegBytes(segBytes)
+  if (!Array.isArray(baseSegs) || baseSegs.length === 0) return []
+  // 段长小于等于基准段长时无需合并
+  if (limit <= BASE_SEG_BYTES) return baseSegs
+  const out = []
+  let cur = null
+  for (let i = 0; i < baseSegs.length; i++) {
+    const s = baseSegs[i]
+    if (cur && cur.byteLen + s.byteLen <= limit) {
+      cur.byteLen += s.byteLen
+      cur.charLen += s.charLen
+    } else {
+      cur = { byteLen: s.byteLen, charLen: s.charLen, diskOffset: 0, text: undefined, dirty: false }
+      out.push(cur)
+    }
+  }
+  return out
+}
+
+function parseIdx(text, size, mtime) {
   if (!text) return null
   try {
     const data = JSON.parse(text)
-    if (!data || data.v !== 1) return null
-    if (data.segBytes !== segBytes) return null
+    if (!data || (data.v !== 1 && data.v !== 2)) return null
+    // v2 用 unit 标明基准段长；兼容旧 v1：只有旧索引本身就是 128 字节段时可直接复用
+    const unit = data.v === 2 ? data.unit : data.segBytes
+    if (unit !== BASE_SEG_BYTES) return null
     if (!Array.isArray(data.segs) || data.segs.length === 0) return null
     // 文件被外部改动（大小相同但 mtime 变了）时判定失效
     if (mtime && data.mtime && data.mtime !== mtime) return null
@@ -360,6 +398,8 @@ function parseIdx(text, segBytes, size, mtime) {
       // （1~3 字节/字符，代理对 2 字符 4 字节）。挡掉明显被改坏的段表。
       if (!isFinite(byteLen) || !isFinite(charLen)) return null
       if (byteLen < 0 || charLen < 0 || byteLen % 1 !== 0 || charLen % 1 !== 0) return null
+      // 索引是基准段表，单段不能超过 BASE_SEG_BYTES
+      if (byteLen > BASE_SEG_BYTES) return null
       // charLen === 0 允许 byteLen > 0：文件尾部不是完整 UTF-8 时的兜底段
       if (charLen > 0 && (byteLen < charLen || byteLen > charLen * 4)) return null
       segs.push({ byteLen: byteLen, charLen: charLen, diskOffset: total, text: undefined, dirty: false })
@@ -373,8 +413,9 @@ function parseIdx(text, segBytes, size, mtime) {
   }
 }
 
-// 扫描文件重建段表（只记字节/字符数，丢弃文本）
-function scanFile(f, uri, size, segBytes, doc, info, callback) {
+// 扫描文件重建段表（只记字节/字符数，丢弃文本）。
+// 始终按 128 字节基准段扫描并写索引，再按设置合并为逻辑段。
+function scanFile(f, uri, size, limit, doc, info, callback) {
   let pos = 0
   const segs = []
   const step = () => {
@@ -382,7 +423,7 @@ function scanFile(f, uri, size, segBytes, doc, info, callback) {
       finish()
       return
     }
-    const want = Math.min(segBytes, size - pos)
+    const want = Math.min(BASE_SEG_BYTES, size - pos)
     f.readArrayBuffer({
       uri: uri,
       position: pos,
@@ -440,9 +481,12 @@ function scanFile(f, uri, size, segBytes, doc, info, callback) {
   }
   const finish = () => {
     if (segs.length === 0) segs.push(makeSegment('', false))
+    // 先按基准段写索引，再合并成当前设置对应的逻辑段
     doc.segments = segs
     reindex(doc)
-    writeIdx(doc, info)
+    writeIdx(doc, info, segs.map((s) => [s.byteLen, s.charLen]))
+    doc.segments = groupBaseSegments(segs, doc.segBytes)
+    reindex(doc)
     if (callback) callback(null, doc)
   }
   step()
@@ -839,6 +883,10 @@ export function writeDocToUri(doc, uri, callback) {
 
       const start = (src) => {
         source = src
+        // 写盘时顺带把每段拆成 128 字节基准段，供 commitDoc 写 .idx 使用，
+        // 避免保存后再扫一遍文件。
+        const baseSegs = []
+        doc.__baseSegs = null
         let i = 0
         const next = (err) => {
           if (err) {
@@ -846,6 +894,7 @@ export function writeDocToUri(doc, uri, callback) {
             return
           }
           if (i >= segs.length) {
+            doc.__baseSegs = baseSegs
             dropTmp()
             if (callback) callback(null)
             return
@@ -853,9 +902,14 @@ export function writeDocToUri(doc, uri, callback) {
           const seg = segs[i]
           const piece = i
           const writePiece = (text) => {
+            const value = typeof text === 'string' ? text : ''
+            const parts = splitTextByBytes(value, BASE_SEG_BYTES)
+            for (let p = 0; p < parts.length; p++) {
+              baseSegs.push([utf8ByteLength(parts[p]), parts[p].length])
+            }
             f.writeText({
               uri: uri,
-              text: typeof text === 'string' ? text : '',
+              text: value,
               append: piece > 0,
               success: () => {
                 i++
@@ -921,7 +975,8 @@ export function writeDocToUri(doc, uri, callback) {
     })
 }
 
-// 保存成功后提交：重算段在磁盘上的偏移、清除脏标记、逐出窗口外段、写 idx
+// 保存成功后提交：重算段在磁盘上的偏移、清除脏标记、逐出窗口外段、
+// 按写盘时收集到的 128 字节基准段写 idx。
 export function commitDoc(doc, info, callback) {
   if (!doc) {
     if (callback) callback(null)
