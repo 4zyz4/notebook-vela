@@ -362,7 +362,7 @@ public final class NoteLink {
                         }
                         connecting = false;
                         if (nodes == null || nodes.isEmpty()) {
-                            failConnection("设备未连接");
+                            failConnection("请确保小米运动健康在后台运行");
                             return;
                         }
                         node = nodes.get(0);
