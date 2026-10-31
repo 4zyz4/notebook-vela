@@ -363,15 +363,20 @@ export function groupBaseSegments(baseSegs, segBytes) {
   if (limit <= BASE_SEG_BYTES) return baseSegs
   const out = []
   let cur = null
+  // 合并后的段必须重新累计 diskOffset。读取段文本（readSegText / writeDocToUri）
+  // 都按这个偏移定位，若一律写 0，所有段都会从文件头读起，
+  // 结果就是「每一段都是第一段的内容」——长笔记上传/读取时尤其明显。
+  let offset = 0
   for (let i = 0; i < baseSegs.length; i++) {
     const s = baseSegs[i]
     if (cur && cur.byteLen + s.byteLen <= limit) {
       cur.byteLen += s.byteLen
       cur.charLen += s.charLen
     } else {
-      cur = { byteLen: s.byteLen, charLen: s.charLen, diskOffset: 0, text: undefined, dirty: false }
+      cur = { byteLen: s.byteLen, charLen: s.charLen, diskOffset: offset, text: undefined, dirty: false }
       out.push(cur)
     }
+    offset += s.byteLen
   }
   return out
 }
