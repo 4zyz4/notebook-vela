@@ -29,7 +29,7 @@
         @touchend="onTouchEnd">
 
           <!-- 文本内容显示区域：只渲染滚动位置处的 3 个分段（游标可不在其中） -->
-          <div style="flex-direction: column;">
+          <div id="chunkContainer" style="flex-direction: column;">
             <div id="chunkWrap0" style="flex-direction: column;">
               <text style="width: 100%; text-align: left; color: #ffffff; font-size: 26px; line-height: 34px">{{blk0Before}}<span if="{{blk0Cursor}}" id="caret" class="cursor" style="width: 2px; height: 34px; vertical-align: text-bottom; color:#888888;">|</span><span if="{{blk0Cursor}}">{{blk0After}}</span></text>
             </div>
@@ -196,9 +196,10 @@ import { createDocFromText, openDoc, getRange, insertText, deleteBackward, prevC
 const SEG_BYTES = 128
 
 export default {
-  // 非响应式实例属性：分段文档、滚动节流标记
+  // 非响应式实例属性：分段文档、滚动节流标记、上次渲染的内容高度
   __doc: null,
   __scrollScheduled: false,
+  __contentHeight: -1,
 
   private: {
     // 基础属性
@@ -345,7 +346,10 @@ export default {
         this.saveToFile();
       }
       this.$nextTick(() => {
-        setTimeout(() => this.scrollToBottom(), 60);
+        setTimeout(() => {
+          this.refreshContentHeight();
+          this.scrollToBottom();
+        }, 60);
       });
     });
     console.log("编辑器初始化完成, 段数:", this.__doc ? this.__doc.segments.length : 0);
@@ -517,6 +521,7 @@ export default {
       // 延迟执行滚动到底部操作，确保文本渲染完成
       setTimeout(() => {
         try {
+          this.refreshContentHeight();
           this.scrollToBottom();
         } catch (e) {
           console.warn('页面加载后滚动到底部失败:', e);
@@ -796,10 +801,8 @@ export default {
 
         this.onCursorMoved(cursorVisible);
 
-        //自动滚动
-        if (this.cursorPosition >= this.textLength() - 1) {
-          this.$nextTick(() => this.scrollToBottom());
-        }
+        // 仅当内容高度增加时才自动滚动（删除通常不会增高）
+        this.autoScrollIfHeightIncreased();
 
         // 增加操作计数器
         this.incrementOperationCounter();
@@ -849,10 +852,8 @@ export default {
           
           this.onCursorMoved(cursorVisible);
 
-          // 输入字符后，光标在末尾时自动滚到底部
-          if (this.cursorPosition >= this.textLength() - 1) {
-            this.$nextTick(() => this.scrollToBottom());
-          }
+          // 仅当内容高度增加时才自动滚动，避免每次输入都触发
+          this.autoScrollIfHeightIncreased();
         });
       } else {
         console.log("输入完成事件内容为空或未定义，忽略处理");
@@ -1047,11 +1048,6 @@ export default {
       this.clearRecoveryFileThen(() => {
         notifyNotesChange();
       }, false);
-      
-      //计算safe-area大小
-      this.$nextTick(function () { 
-        this.scrollToBottom()
-      });
     } catch (innerError) {
       console.error("保存成功回调处理异常:", innerError);
     }
@@ -1192,6 +1188,51 @@ export default {
     this.clearRecoveryFileThen(() => router.back(), true);
   },
   
+  // 读取当前内容容器高度（包含末尾留白），用于判断内容是否变高
+  refreshContentHeight() {
+    const el = this.$element('chunkContainer');
+    if (!el) return;
+    el.getBoundingClientRect({
+      success: (rect) => {
+        if (rect && typeof rect.height === 'number') {
+          this.__contentHeight = rect.height;
+        }
+      },
+      fail: () => {}
+    });
+  },
+
+  // 仅当内容高度增加时才自动滚到底部（且光标位于末尾并处于当前窗口内）。
+  // 同一渲染周期内多次调用只测量一次，避免频繁滚动。
+  autoScrollIfHeightIncreased() {
+    // 光标不在末尾时不跟随
+    if (this.cursorPosition < this.textLength()) return;
+    if (this.__scrollScheduled) return;
+    this.__scrollScheduled = true;
+    this.$nextTick(() => {
+      const el = this.$element('chunkContainer');
+      if (!el) {
+        this.__scrollScheduled = false;
+        return;
+      }
+      el.getBoundingClientRect({
+        success: (rect) => {
+          this.__scrollScheduled = false;
+          if (!rect || typeof rect.height !== 'number') return;
+          const prev = this.__contentHeight;
+          this.__contentHeight = rect.height;
+          // prev < 0 表示尚未建立基线，只记录本次高度
+          if (prev >= 0 && rect.height > prev && this.isCursorInWindow()) {
+            this.scrollToBottom();
+          }
+        },
+        fail: () => {
+          this.__scrollScheduled = false;
+        }
+      });
+    });
+  },
+
   // 滚动到底部：仅当光标在末尾且位于当前窗口内
   scrollToBottom() {
     // 光标不在末尾，或已被滚出当前窗口时不跟随，避免把视图拉回
@@ -1271,6 +1312,8 @@ export default {
           setTimeout(() => {
             const sc = this.$element('textScroll');
             if (sc) sc.scrollTo({ top: nt, behavior: 'auto' });
+            // 窗口平移后内容高度会变化，重建基线
+            this.refreshContentHeight();
             this.scrollWait = false;
           }, 60);
         });
@@ -1305,6 +1348,8 @@ export default {
           setTimeout(() => {
             const sc = this.$element('textScroll');
             if (sc) sc.scrollTo({ top: nt, behavior: 'auto' });
+            // 窗口平移后内容高度会变化，重建基线
+            this.refreshContentHeight();
             this.scrollWait = false;
           }, 60);
         });
