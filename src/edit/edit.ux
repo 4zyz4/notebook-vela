@@ -102,6 +102,13 @@
         </div>
       </div>
     </div>
+
+    <!-- 设置未就绪时的加载提示：样式与 index 页一致；正常路径不会出现 -->
+    <div class="load-dialog" if="{{settingsLoading}}">
+      <div class="load-content">
+        <text class="load-title" style="margin-bottom:0px">加载中</text>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -111,6 +118,35 @@
   background-color: #000000;
   width: 100%;
   height: 100%;
+}
+/* 加载提示：卡片样式与 index 页一致；背景用不透明黑，遮住下面尚未应用设置的排版 */
+.load-dialog {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background-color: #000000;
+  /* 高于键盘等元素的 z-index，确保遮罩盖住整页 */
+  z-index: 100;
+  justify-content: center;
+  align-items: center;
+}
+
+.load-content {
+  width: 90%;
+  background-color: #1f1f1f;
+  border: 3px solid rgba(255,255,255,0.06);
+  border-radius: 12px;
+  padding: 20px;
+  flex-direction: column;
+}
+
+.load-title {
+  font-size: 28px;
+  color: #ffffff;
+  text-align: center;
+  margin-bottom: 10px;
 }
 .header-btn {
   width: 80px;
@@ -190,7 +226,7 @@
 import router from '@system.router'
 import prompt from '@system.prompt'
 import vibrator from '@system.vibrator'
-import {notifyNotesChange, getCachedSettings } from '../Common/utils.js'
+import {notifyNotesChange, getCachedSettings, getCachedSettingsSync } from '../Common/utils.js'
 import { createDocFromText, openDoc, getRange, insertText, deleteBackward, prevCharPos, nextCharPos, locate, materialize, writeDocToUri, commitDoc, loadRange, setWindow, isLoaded } from '../Common/textSegments.js'
 
 // 调试用：单段字节长度（正式值为 512，调小便于观察分段/翻段行为）
@@ -203,6 +239,8 @@ export default {
   __contentHeight: -1,
 
   private: {
+    // 设置是否还在加载：仅在极端情况（全局缓存未建立）下会看到“加载中”
+    settingsLoading: true,
     // 基础属性
     index: -1,
     content: '',
@@ -283,8 +321,9 @@ export default {
 
   onInit() {
     try {
-      // 加载设置
-      this.loadSettings();
+      // 先应用设置：正常路径下 index 页已把设置写入 global 缓存，这里同步拿到，
+      // 首次渲染就是真实设置；极端情况（缓存未建立）才显示“加载中”并异步读取
+      this.initSettings();
 
       // 设置创建时间为打开页面的时间
       this.createTime = Date.now();
@@ -306,7 +345,48 @@ export default {
       console.error('初始化页面时出错:', e);
       this.__doc = createDocFromText('', SEG_BYTES, '');
       this.hideInput = false;
+      this.settingsLoading = false;
     }
+  },
+
+  // 应用设置：优先用跨页面缓存同步完成，正常情况下不会出现加载遮罩
+  initSettings() {
+    const cached = getCachedSettingsSync();
+    if (cached) {
+      this.applySettings(cached);
+      this.settingsLoading = false;
+      return;
+    }
+
+    // 极端情况：缓存还没建立（如冷启动后立刻进入编辑器）。
+    // 先显示“加载中”，读到设置并应用后再撤掉遮罩。
+    let hidden = false;
+    const hideOverlay = () => {
+      if (hidden) return;
+      hidden = true;
+      // 等本帧的布局与子组件属性更新完成再撤遮罩，避免露出默认设置的排版
+      this.$nextTick(() => {
+        this.settingsLoading = false;
+      });
+    };
+    // 兜底：settings 读取异常时不至于一直停在加载中
+    const timer = setTimeout(hideOverlay, 1000);
+
+    getCachedSettings((err, settings) => {
+      if (settings) {
+        this.applySettings(settings);
+      }
+      clearTimeout(timer);
+      hideOverlay();
+    });
+  },
+
+  // 把设置写入页面状态
+  applySettings(settings) {
+    this.vibrateMode = settings.vibrationEnabled !== false ? 'short' : '';
+    this.borderWidth = settings.borderWidth || '10px';
+    this.autoScrollType = settings.autoScrollType || 'oneBlank';
+    this.keyboardLayout = settings.keyboardLayout === 'T9' ? 'T9' : 'QWERTY';
   },
 
   // ===== 分段文档 =====
@@ -502,18 +582,6 @@ export default {
     this.loadWindowAndRender();
   },
 
-  // 加载设置
-  loadSettings() {
-    getCachedSettings((err, settings) => {
-      if (!err && settings) {
-        this.vibrateMode = settings.vibrationEnabled !== false ? 'short' : '';
-        this.borderWidth = settings.borderWidth || '10px';
-        this.autoScrollType = settings.autoScrollType || 'oneBlank';
-        this.keyboardLayout = settings.keyboardLayout === 'T9' ? 'T9' : 'QWERTY';
-      }
-    });
-  },
-  
   onReady() {
     //星方：try-catch无意义使用(已修复)
     // 先更新时间

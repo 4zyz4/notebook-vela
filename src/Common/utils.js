@@ -6,17 +6,81 @@ let settingsListeners = [];
 // 笔记变化监听器
 let notesListeners = [];
 
-// 直接读取设置文件，无缓存
+// 跨页面共享的设置缓存。
+// Vela 的 global 对象在所有页面间共享，因此 index 页读到的设置，
+// edit 页在 onInit 阶段就能同步拿到并在首次渲染前应用，避免先用默认值渲染一帧。
+// 设置只会通过 saveSettings 修改（保存成功时同步更新缓存），所以缓存始终与文件一致。
+const SETTINGS_CACHE_KEY = '__notebookSettingsCache';
+
+function readSettingsCache() {
+  try {
+    if (typeof global !== 'undefined' && global[SETTINGS_CACHE_KEY]) {
+      return global[SETTINGS_CACHE_KEY];
+    }
+  } catch (e) {
+    // global 不可用时按无缓存处理
+  }
+  return null;
+}
+
+function writeSettingsCache(settings) {
+  try {
+    if (typeof global !== 'undefined') {
+      global[SETTINGS_CACHE_KEY] = settings;
+    }
+  } catch (e) {
+    // 缓存失败不影响正常读写设置
+  }
+}
+
+// 同步获取已缓存的设置；没有缓存时返回 null，由调用方决定是否异步读取
+export function getCachedSettingsSync() {
+  return readSettingsCache();
+}
+
+// 首次读盘尚未返回时，后续调用排队等待，避免同一页面重复读同一个文件
+let settingsLoading = false;
+let settingsWaiters = [];
+
+// 读取设置：已缓存时同步回调，否则异步读盘（并发调用会合并为一次读取）
 export function getCachedSettings(callback) {
   if (typeof callback !== 'function') {
     console.error('getCachedSettings: callback必须是一个函数');
     return;
   }
 
+  const cached = readSettingsCache();
+  if (cached) {
+    callback(null, cached);
+    return;
+  }
+
+  settingsWaiters.push(callback);
+  if (settingsLoading) return;
+  settingsLoading = true;
+
+  const finish = (err, settings) => {
+    // 只在读取成功时缓存：失败可能只是暂时性的，下次调用重新读盘
+    if (!err && settings) {
+      writeSettingsCache(settings);
+    }
+    settingsLoading = false;
+    // 先取走队列，回调中再次调用 getCachedSettings 不会重复入队
+    const waiters = settingsWaiters;
+    settingsWaiters = [];
+    waiters.forEach((fn) => {
+      try {
+        fn(err, settings);
+      } catch (e) {
+        console.error('设置读取回调执行出错:', e);
+      }
+    });
+  };
+
   import('@system.file').then(file => {
     if (!file || !file.default) {
       console.error('无法导入文件系统模块');
-      callback(new Error('Failed to import file system module'), getDefaultSettings());
+      finish(new Error('Failed to import file system module'), getDefaultSettings());
       return;
     }
 
@@ -26,24 +90,31 @@ export function getCachedSettings(callback) {
         try {
           if (result && result.text) {
             const settings = JSON.parse(result.text);
-            callback(null, settings);
+            finish(null, settings);
           } else {
             console.log('设置文件为空，使用默认设置');
-            callback(null, getDefaultSettings());
+            finish(null, getDefaultSettings());
           }
         } catch (e) {
           console.log('解析设置失败', e);
-          callback(e, getDefaultSettings());
+          finish(e, getDefaultSettings());
         }
       },
       fail: (data, code) => {
+        if (code === 404) {
+          // 设置文件还不存在（尚未改过设置）：默认值就是当前真实设置，
+          // 按成功处理并缓存，避免每次进页面都读盘、都闪一次“加载中”
+          console.log('设置文件不存在，使用默认设置');
+          finish(null, getDefaultSettings());
+          return;
+        }
         console.log('读取设置文件失败', code);
-        callback(new Error(`Failed to read settings: ${code}`), getDefaultSettings());
+        finish(new Error(`Failed to read settings: ${code}`), getDefaultSettings());
       }
     });
   }).catch(err => {
     console.error('导入文件系统模块时出错:', err);
-    callback(err, getDefaultSettings());
+    finish(err, getDefaultSettings());
   });
 }
 
@@ -85,6 +156,8 @@ export function saveSettings(settings, callback) {
       text: JSON.stringify(settings),
       success: () => {
         console.log('设置保存成功');
+        // 写入成功后再更新缓存，保证缓存与文件内容一致
+        writeSettingsCache(settings);
         notifySettingsChange(settings);
         if (callback) callback(null);
       },
@@ -99,9 +172,9 @@ export function saveSettings(settings, callback) {
   });
 }
 
-// 清除设置缓存（保留空函数以兼容现有代码）
+// 清除设置缓存：下次读取会重新读盘
 export function clearSettingsCache() {
-  // 不再使用缓存，此函数已废弃
+  writeSettingsCache(null);
 }
 
 // 添加设置变化监听器
