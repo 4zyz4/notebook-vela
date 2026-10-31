@@ -38,6 +38,22 @@ export function getCachedSettingsSync() {
   return readSettingsCache();
 }
 
+// 笔记分段长度可选值（单位：UTF-8 字节）
+export const SEG_BYTES_OPTIONS = [128, 256, 512, 768]
+
+// 规整分段长度：只接受设置页提供的档位，非法值回落到默认值
+export function normalizeSegBytes(value) {
+  const n = Math.floor(Number(value))
+  return SEG_BYTES_OPTIONS.indexOf(n) !== -1 ? n : DEFAULT_SEG_BYTES
+}
+
+// 同步读取当前分段长度。写在设置缓存里，写入路径（保存/导入）可随时取用；
+// 缓存尚未建立时（冷启动极早期）按默认值处理。
+export function getSegBytes() {
+  const cached = readSettingsCache()
+  return normalizeSegBytes(cached ? cached.segBytes : DEFAULT_SEG_BYTES)
+}
+
 // 首次读盘尚未返回时，后续调用排队等待，避免同一页面重复读同一个文件
 let settingsLoading = false;
 let settingsWaiters = [];
@@ -125,7 +141,8 @@ function getDefaultSettings() {
     timeDisplayType: 'createTime',
     autoScrollType: 'oneBlank',
     borderWidth: '10px',
-    keyboardLayout: 'QWERTY'
+    keyboardLayout: 'QWERTY',
+    segBytes: DEFAULT_SEG_BYTES
   };
 }
 
@@ -245,7 +262,7 @@ export function saveNoteFile(noteId, content, callback) {
     const f = file.default;
     const uri = `internal://files/note_${noteId}.txt`;
     const staging = uri + '.save';
-    const doc = createDocFromText(content || '', DEFAULT_SEG_BYTES, uri);
+    const doc = createDocFromText(content || '', getSegBytes(), uri);
 
     // 先写 staging，再复制到目标：整篇覆盖失败时不会破坏原笔记。
     writeDocToUri(doc, staging, (writeErr) => {

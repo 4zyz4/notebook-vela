@@ -2,11 +2,12 @@
 
 ## 1. 背景
 
-手环端从 2.1.0 开始把笔记按 **128 字节一个文本段** 存储：
+手环端从 2.1.0 开始把笔记按「分段长度」设置切分存储（当前默认 **256 字节**，
+旧版本为 128；可在设置页改为 128 / 256 / 512 / 768）：
 
 ```
 internal://files/note_<id>.txt        纯 UTF-8 文本（兼容旧路径）
-internal://files/note_<id>.txt.idx    段表：每段的 byteLen / charLen
+internal://files/note_<id>.txt.idx    段表（v2）：固定 128 字节基准段，每段的 byteLen / charLen
 ```
 
 编辑器只加载当前窗口内的段，保存时流式重写。旧 Android 端一次性收发整篇
@@ -17,7 +18,11 @@ internal://files/note_<id>.txt.idx    段表：每段的 byteLen / charLen
 3. 旧 `saveNoteFile` 使用整篇 `writeText`，会让 `.idx` 失效。
 
 协议 v2 改为 **按字符区间读取 + 按 UTF-8 安全分片上写**。手环端内部仍然使用
-128 字节段，Android 端不需要知道段表，只需要总字符数和一段一段的文本。
+设置中的段长（默认 256 字节），Android 端不需要知道段表，只需要总字符数和一段一段的文本。
+
+修改分段长度不会重扫笔记文件：`.idx` 固定按 128 字节基准段记录，
+256 / 512 / 768 都是它的整数倍，打开时只把基准段合并成当前设置的逻辑段。
+旧版 `.idx`（v1）只有在自身就是 128 字节段时才直接复用，否则首次打开重扫一次并升级为 v2。
 
 ## 2. 能力发现
 
@@ -73,7 +78,7 @@ Android                         手环
   "type": "note_meta",
   "requestId": "dl_...",
   "noteId": "1720000000000",
-  "segBytes": 128,
+  "segBytes": 256,
   "totalBytes": 1234,
   "charCount": 456,
   "segmentCount": 10
@@ -81,6 +86,7 @@ Android                         手环
 ```
 
 - `charCount` 是 UTF-16 code unit 数，与 Android `String.length()` 一致。
+- `segBytes` 是手环当前设置的分段长度（默认 256），仅用于调试。
 - `segmentCount` 只用于展示/调试，Android 不依赖段表。
 
 ### note_read
@@ -143,7 +149,7 @@ Android 使用 `Utf8Chunks.split(content, 2048)`：
 
 1. `note_write_begin` 创建 `internal://files/upload_<requestId>.txt`；
 2. 每个 `note_write_chunk` 追加写入临时文件，成功后回 `note_write_ack`；
-3. `note_write_commit` 调用 `importTextFile(tmpUri, noteUri, 128)`：
+3. `note_write_commit` 调用 `importTextFile(tmpUri, noteUri, segBytes)`（`segBytes` 取自设置，默认 256）：
    - `openDoc(tmpUri)` 只扫描临时文件建立段表；
    - `writeDocToUri` 按段流式写入 `note_<id>.txt.import`；
    - 成功后复制到正式文件，再 `commitDoc` 写 `.idx`；
@@ -181,6 +187,7 @@ Android 使用 `Utf8Chunks.split(content, 2048)`：
 | 功能 | 文件 |
 | --- | --- |
 | 段模型 / 读写 / 导入 | `src/Common/textSegments.js` |
+| 分段长度设置 | `src/settings/settings.ux`、`src/Common/utils.js` |
 | 手环协议处理 | `src/index/index.ux` |
 | 手环整篇保存兼容 | `src/Common/utils.js` 的 `saveNoteFile` |
 | Android 协议构造 | `android/app/src/main/java/com/zyz4/notebook/NoteProtocol.java` |

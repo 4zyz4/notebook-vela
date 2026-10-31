@@ -74,13 +74,25 @@
         </div>
       </list-item>
 
+      <list-item type="item" class="setting-item">
+        <div class="setting-content">
+          <text class="setting-label">分段长度</text>
+          <text class="setting-description">单段字节数（128/256/512/768），越大分段越少</text>
+          <input 
+            type="button" 
+            class="setting-button" 
+            value="{{segBytes}}" 
+            onclick="toggleSegBytes"/>
+        </div>
+      </list-item>
+
     </list>
   </div>
 </template>
 
 <script>
 import router from '@system.router'
-import { getCachedSettings, saveSettings} from '../Common/utils.js'
+import { getCachedSettings, saveSettings, SEG_BYTES_OPTIONS, normalizeSegBytes } from '../Common/utils.js'
 
 export default {
   private: {
@@ -89,6 +101,7 @@ export default {
     autoScrollType: 'oneBlank', // oneBlank 或 twoBlank
     borderWidth: '10px', // 0px, 10px 或 20px
     keyboardLayout: 'QWERTY', // QWERTY（26键）或 T9（9键）
+    segBytes: 256, // 分段长度：默认 256，可选 128 / 256 / 512 / 768 字节
     timeUpdateTimer: null, // 添加定时器变量
     currentTime: '' // 添加当前时间变量
   },
@@ -140,6 +153,7 @@ export default {
         this.autoScrollType = settings.autoScrollType || 'oneBlank';
         this.borderWidth = settings.borderWidth || '10px';
         this.keyboardLayout = settings.keyboardLayout === 'T9' ? 'T9' : 'QWERTY';
+        this.segBytes = normalizeSegBytes(settings.segBytes);
       }
     });
   },
@@ -151,7 +165,8 @@ export default {
       timeDisplayType: this.timeDisplayType,
       autoScrollType: this.autoScrollType,
       borderWidth: this.borderWidth,
-      keyboardLayout: this.keyboardLayout
+      keyboardLayout: this.keyboardLayout,
+      segBytes: this.segBytes
     };
 
     saveSettings(settings, (err) => {
@@ -229,6 +244,14 @@ export default {
     } else {
       this.borderWidth = '0px';
     }
+    // 立即保存设置
+    this.saveCurrentSettings();
+    this.$forceUpdate();
+  },
+
+  toggleSegBytes() {
+    const i = SEG_BYTES_OPTIONS.indexOf(this.segBytes);
+    this.segBytes = SEG_BYTES_OPTIONS[(i + 1) % SEG_BYTES_OPTIONS.length];
     // 立即保存设置
     this.saveCurrentSettings();
     this.$forceUpdate();

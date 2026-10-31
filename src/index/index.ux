@@ -45,8 +45,8 @@
 
 <script>
 import router from '@system.router'
-import { getCachedSettings, addSettingsListener, removeSettingsListener, addNotesListener, removeNotesListener } from '../Common/utils.js'
-import { openDoc, locate, loadRange, getRange, setWindow, importTextFile, utf8ByteLength, DEFAULT_SEG_BYTES } from '../Common/textSegments.js'
+import { getCachedSettings, getSegBytes, addSettingsListener, removeSettingsListener, addNotesListener, removeNotesListener } from '../Common/utils.js'
+import { openDoc, locate, loadRange, getRange, setWindow, importTextFile, utf8ByteLength } from '../Common/textSegments.js'
 // 导入设备通信模块
 import interconnect from '@system.interconnect'
 import prompt from '@system.prompt'
@@ -74,6 +74,8 @@ export default {
     __openDocs: {},
     // 当前分片上传状态；同一时间只允许一个上传
     __upload: null,
+    // 已打开文档使用的分段长度，设置变化时用于决定是否丢弃缓存
+    __openDocSegBytes: null,
     // 请求序号，保证同一毫秒内多次请求也不冲突
     __reqSeq: 0
   },
@@ -326,7 +328,7 @@ export default {
     })
   },
 
-  // ===== 协议 v2：按字符区间读取（内部映射到 128 字节文本段） =====
+  // ===== 协议 v2：按字符区间读取（内部映射到设置中的分段长度） =====
 
   sendMessage(data, label) {
     if (!this.connect) return
@@ -367,12 +369,13 @@ export default {
       f.get({
         uri: uri,
         success: () => {
-          openDoc(uri, DEFAULT_SEG_BYTES, (err, doc) => {
+          openDoc(uri, getSegBytes(), (err, doc) => {
             if (err || !doc) {
               this.sendNoteError(requestId, noteId, err ? (err.message || '打开失败') : '打开失败')
               return
             }
             this.__openDocs[requestId] = { doc, noteId }
+            this.__openDocSegBytes = doc.segBytes
             this.sendMessage({
               type: 'note_meta',
               requestId: requestId,
@@ -490,13 +493,14 @@ export default {
       return
     }
     const uri = `internal://files/note_${noteId}.txt`
-    openDoc(uri, DEFAULT_SEG_BYTES, (err, doc) => {
+    openDoc(uri, getSegBytes(), (err, doc) => {
       if (err || !doc) {
         callback(err || new Error('打开失败'))
         return
       }
       const entry = { doc: doc, noteId: noteId }
       this.__openDocs[requestId] = entry
+      this.__openDocSegBytes = doc.segBytes
       callback(null, entry)
     })
   },
@@ -656,7 +660,7 @@ export default {
       const created = !upload.noteId
       const dstUri = `internal://files/note_${noteId}.txt`
 
-      importTextFile(upload.tmpUri, dstUri, DEFAULT_SEG_BYTES, (importErr) => {
+      importTextFile(upload.tmpUri, dstUri, getSegBytes(), (importErr) => {
         if (this.__upload !== upload) return
         if (importErr) {
           this.failUpload('导入分段失败: ' + (importErr.message || importErr))
@@ -919,6 +923,14 @@ export default {
       this.timeDisplayType = settings.timeDisplayType || 'createTime';
       // 重新排序笔记
       this.sortNotes();
+    }
+    // 分段长度变了：已打开的文档仍按旧段长建表，丢弃后下次读取用新段长重建
+    if (settings) {
+      const segBytes = getSegBytes();
+      if (segBytes !== this.__openDocSegBytes) {
+        this.__openDocs = {};
+        this.__openDocSegBytes = segBytes;
+      }
     }
   },
   
