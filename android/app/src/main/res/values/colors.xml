@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="page_bg">#ff0d0d0d</color>
+    <color name="card_bg">#ff1e1e1e</color>
+    <color name="button_bg">#ff333333</color>
+    <color name="text_main">#e6ffffff</color>
+    <color name="text_sub">#99ffffff</color>
+    <color name="stroke">#ff404040</color>
+    <color name="btn_text_light">#ffffffff</color>
+    <color name="white">#ffffffff</color>
+    <color name="black">#ff000000</color>
+</resources>

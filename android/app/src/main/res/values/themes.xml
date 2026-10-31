@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.Notebook" parent="Theme.MaterialComponents.DayNight.NoActionBar">
+        <item name="colorPrimary">@color/button_bg</item>
+        <item name="colorPrimaryVariant">@color/button_bg</item>
+        <item name="colorOnPrimary">@color/btn_text_light</item>
+        <item name="colorSecondary">@color/button_bg</item>
+        <item name="colorOnSecondary">@color/btn_text_light</item>
+        <item name="colorSurface">@color/card_bg</item>
+        <item name="colorOnSurface">@color/text_main</item>
+        <item name="android:windowBackground">@color/page_bg</item>
+        <item name="android:statusBarColor">@color/card_bg</item>
+        <item name="android:navigationBarColor">@color/page_bg</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowLightNavigationBar">false</item>
+        <item name="android:windowLayoutInDisplayCutoutMode">never</item>
+    </style>
+</resources>
