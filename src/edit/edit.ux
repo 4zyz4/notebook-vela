@@ -51,6 +51,7 @@
           id="inputMethod"
           hide="{{hideInput}}"
           vibratemode="{{vibrateMode}}"
+          keyboardtype="{{keyboardLayout}}"
           @delete="onDelete"
           @complete="onInputComplete"
         ></input-method>
@@ -213,6 +214,7 @@ export default {
     vibrateMode: 'short',
     currentTime: "",
     borderWidth: '10px', // 默认边框宽度
+    keyboardLayout: 'QWERTY', // 键盘布局：QWERTY（26键）或 T9（9键）
     fromRecovery: false, // 是否从恢复文件进入
     loadFailed: false, // 既有笔记读取失败：禁止保存，避免覆盖原内容
 
@@ -507,6 +509,7 @@ export default {
         this.vibrateMode = settings.vibrationEnabled !== false ? 'short' : '';
         this.borderWidth = settings.borderWidth || '10px';
         this.autoScrollType = settings.autoScrollType || 'oneBlank';
+        this.keyboardLayout = settings.keyboardLayout === 'T9' ? 'T9' : 'QWERTY';
       }
     });
   },
