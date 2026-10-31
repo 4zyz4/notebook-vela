@@ -2,3 +2,6 @@ node_modules
 backup
 build
 dist
+.gradle
+local.properties
+.idea

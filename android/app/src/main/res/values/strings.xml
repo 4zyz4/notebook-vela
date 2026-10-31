@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">笔记管理器</string>
+
+    <string name="main_title">笔记</string>
+    <string name="connecting">手环连接中</string>
+    <string name="connecting_desc">请确保小米运动健康后台运行，\n并且手环打开了笔记本应用</string>
+    <string name="connected">设备连接成功</string>
+    <string name="connected_desc">%s 已连接</string>
+    <string name="app_not_installed">笔记应用未安装</string>
+    <string name="app_not_installed_desc">请在手环上安装笔记应用</string>
+    <string name="connect_failed">手环连接失败</string>
+    <string name="disconnected">应用断开连接</string>
+
+    <string name="empty_notes">暂无笔记</string>
+    <string name="add_note">添加笔记</string>
+    <string name="refresh">刷新</string>
+    <string name="delete">删除</string>
+    <string name="delete_note_title">删除笔记</string>
+    <string name="delete_note_message">确定删除这条笔记吗？</string>
+    <string name="cancel">取消</string>
+    <string name="delete_request_sent">已发送删除请求</string>
+    <string name="note_deleted">笔记删除成功</string>
+    <string name="note_delete_failed">笔记删除失败: %s</string>
+
+    <string name="new_note_title">新建笔记</string>
+    <string name="edit_note_title">编辑笔记</string>
+    <string name="note_hint">输入笔记内容...</string>
+    <string name="content_empty">内容不能为空</string>
+    <string name="save">保存</string>
+    <string name="save_success">保存成功</string>
+    <string name="save_failed">保存失败</string>
+    <string name="note_update_failed">笔记更新失败: %s</string>
+    <string name="note_create_failed">笔记创建失败: %s</string>
+
+    <string name="loading">加载中</string>
+    <string name="loading_note">正在读取分段…</string>
+    <string name="sync_progress">正在分片同步 %d%%</string>
+    <string name="saving_wait">正在保存，请稍候</string>
+    <string name="read_failed">笔记读取失败</string>
+    <string name="note_not_found">笔记不存在</string>
+    <string name="connection_required">请先连接手环</string>
+    <string name="segment_info">共 %1$d 字 · 分片同步 128 字节/段</string>
+
+    <string name="unsaved_title">放弃修改？</string>
+    <string name="unsaved_message">当前笔记尚未保存，确定离开吗？</string>
+    <string name="leave">离开</string>
+    <string name="stay">继续编辑</string>
+</resources>

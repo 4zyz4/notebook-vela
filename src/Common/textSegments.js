@@ -5,8 +5,10 @@
 // 若索引缺失或失效，则扫描一遍文件重建段表（只记元数据、不驻留文本）。
 //
 // 文件仍是纯 UTF-8 文本，保证 index 预览、互连读整篇、二维码等旧路径不受影响。
+// 手机分片上传落盘时使用 importTextFile：先扫描临时文件建段表，再流式写入正式笔记，
+// 因此大笔记不会在手表端被拼成一整串。
 
-const DEFAULT_SEG_BYTES = 128
+export const DEFAULT_SEG_BYTES = 128
 // 一个段至少要能装下最宽的 UTF-8 字符（4 字节），否则段表无法推进
 const MIN_SEG_BYTES = 4
 
@@ -936,6 +938,59 @@ export function commitDoc(doc, info, callback) {
   setWindow(doc, doc.window.from, doc.window.to)
   writeIdx(doc, info)
   if (callback) callback(null)
+}
+
+// 从任意文本文件导入为分段笔记：
+// 1) 先扫描源文件建立段表（只记字节/字符数，不把全文读进内存）；
+// 2) 再按段从源文件读回并写入目标文件（流式，不拼接全文）；
+// 3) 最后重算偏移并写 idx。
+// 源文件与目标文件必须不同；手环端的“手机分片上传”在 commit 时走这条路径。
+export function importTextFile(srcUri, dstUri, segBytes, callback) {
+  const limit = normSegBytes(segBytes)
+  openDoc(srcUri, limit, (openErr, doc) => {
+    if (openErr || !doc) {
+      if (callback) callback(openErr || new Error('importTextFile open source fail'))
+      return
+    }
+    // 先写到 staging 文件，成功后再复制到目标，避免导入中途失败把原笔记截断。
+    const staging = dstUri + '.import'
+    writeDocToUri(doc, staging, (writeErr) => {
+      if (writeErr) {
+        importFile()
+          .then((f) => f.delete({ uri: staging, success: () => {}, fail: () => {} }))
+          .catch(() => {})
+        if (callback) callback(writeErr)
+        return
+      }
+      importFile()
+        .then((f) => {
+          const cleanup = () => {
+            f.delete({ uri: staging, success: () => {}, fail: () => {} })
+          }
+          f.copy({
+            srcUri: staging,
+            dstUri: dstUri,
+            success: () => {
+              cleanup()
+              doc.uri = dstUri
+              doc.idxUri = idxUriOf(dstUri)
+              f.get({
+                uri: dstUri,
+                success: (info) => commitDoc(doc, info, callback),
+                fail: () => commitDoc(doc, null, callback),
+              })
+            },
+            fail: (data, code) => {
+              cleanup()
+              if (callback) callback(new Error('importTextFile copy fail ' + code))
+            },
+          })
+        })
+        .catch((err) => {
+          if (callback) callback(err)
+        })
+    })
+  })
 }
 
 // 兼容旧接口名（逐段写盘），内部改走流式写整篇

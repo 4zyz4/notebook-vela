@@ -1,0 +1,63 @@
+plugins {
+    id "com.android.application"
+}
+
+android {
+    namespace "com.zyz4.notebook"
+    compileSdk 36
+
+    defaultConfig {
+        applicationId "com.zyz4.notebook"
+        minSdk 29
+        targetSdk 35
+        versionCode 7
+        versionName "2.2.0"
+    }
+
+    signingConfigs {
+        release {
+            storeFile file("../keystore/notebook.p12")
+            storeType "PKCS12"
+            storePassword "notebook"
+            keyAlias "notebook"
+            keyPassword "notebook"
+        }
+    }
+
+    buildTypes {
+        debug {
+            signingConfig signingConfigs.release
+        }
+        release {
+            minifyEnabled false
+            shrinkResources false
+            signingConfig signingConfigs.release
+            proguardFiles getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro"
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_11
+        targetCompatibility JavaVersion.VERSION_11
+    }
+
+    packaging {
+        resources {
+            excludes += [
+                    "META-INF/AL2.0",
+                    "META-INF/LGPL2.1",
+                    "META-INF/DEPENDENCIES",
+                    "META-INF/LICENSE*",
+                    "META-INF/NOTICE*"
+            ]
+        }
+    }
+}
+
+dependencies {
+    implementation fileTree(dir: "libs", include: ["*.jar", "*.aar"])
+    implementation "androidx.appcompat:appcompat:1.7.0"
+    implementation "com.google.android.material:material:1.12.0"
+    implementation "androidx.recyclerview:recyclerview:1.3.2"
+    implementation "androidx.constraintlayout:constraintlayout:2.2.0"
+}

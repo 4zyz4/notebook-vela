@@ -1,4 +1,4 @@
-import { decodeUtf8 } from './textSegments.js'
+import { decodeUtf8, createDocFromText, writeDocToUri, commitDoc, DEFAULT_SEG_BYTES } from './textSegments.js'
 
 // 全局设置监听器
 let settingsListeners = [];
@@ -230,7 +230,10 @@ export function notifyNotesChange() {
   });
 }
 
-// 保存单个笔记文件
+// 保存单个笔记文件。
+// 注意：这里必须走分段写入，不能再使用 writeText 整篇覆盖。
+// 整篇 writeText 会让 note_<id>.txt.idx 与实际内容错位，编辑器下次打开
+// 虽然能靠大小/时间校验发现，但会退化为全量扫描；分片上传也依赖 idx。
 export function saveNoteFile(noteId, content, callback) {
   import('@system.file').then(file => {
     if (!file || !file.default) {
@@ -239,19 +242,46 @@ export function saveNoteFile(noteId, content, callback) {
       return;
     }
 
-    file.default.writeText({
-      uri: `internal://files/note_${noteId}.txt`,
-      text: content,
-      success: () => {
-        console.log(`笔记文件 note_${noteId}.txt 保存成功`);
-        // whole-file 写入后分段索引失效，删除以便下次按内容重建
-        file.default.delete({ uri: `internal://files/note_${noteId}.txt.idx`, success: () => {}, fail: () => {} });
-        if (callback) callback(null);
-      },
-      fail: (data, code) => {
-        console.error(`保存笔记文件失败: ${code}`, data);
-        if (callback) callback(new Error(`Failed to save note file: ${code}`));
+    const f = file.default;
+    const uri = `internal://files/note_${noteId}.txt`;
+    const staging = uri + '.save';
+    const doc = createDocFromText(content || '', DEFAULT_SEG_BYTES, uri);
+
+    // 先写 staging，再复制到目标：整篇覆盖失败时不会破坏原笔记。
+    writeDocToUri(doc, staging, (writeErr) => {
+      if (writeErr) {
+        f.delete({ uri: staging, success: () => {}, fail: () => {} });
+        console.error(`保存笔记文件失败: ${writeErr.message || writeErr}`);
+        if (callback) callback(writeErr);
+        return;
       }
+      f.copy({
+        srcUri: staging,
+        dstUri: uri,
+        success: () => {
+          f.delete({ uri: staging, success: () => {}, fail: () => {} });
+          f.get({
+            uri: uri,
+            success: (info) => {
+              commitDoc(doc, info, () => {
+                console.log(`笔记文件 note_${noteId}.txt 保存成功（分段写入）`);
+                if (callback) callback(null);
+              });
+            },
+            fail: () => {
+              commitDoc(doc, null, () => {
+                console.log(`笔记文件 note_${noteId}.txt 保存成功（分段写入，无文件信息）`);
+                if (callback) callback(null);
+              });
+            }
+          });
+        },
+        fail: (data, code) => {
+          f.delete({ uri: staging, success: () => {}, fail: () => {} });
+          console.error(`保存笔记文件失败: copy ${code}`, data);
+          if (callback) callback(new Error(`Failed to save note file: ${code}`));
+        }
+      });
     });
   }).catch(err => {
     console.error('导入文件系统模块时出错:', err);

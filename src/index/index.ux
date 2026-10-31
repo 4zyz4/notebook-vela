@@ -46,6 +46,7 @@
 <script>
 import router from '@system.router'
 import { getCachedSettings, addSettingsListener, removeSettingsListener, addNotesListener, removeNotesListener } from '../Common/utils.js'
+import { openDoc, locate, loadRange, getRange, setWindow, importTextFile, utf8ByteLength, DEFAULT_SEG_BYTES } from '../Common/textSegments.js'
 // 导入设备通信模块
 import interconnect from '@system.interconnect'
 import prompt from '@system.prompt'
@@ -66,7 +67,15 @@ export default {
     notesChangeHandler: null, // 笔记变化监听器引用
     // 新增设备通信相关属性
     connect: null, // 连接实例
-    isConnected: false // 连接状态
+    isConnected: false, // 连接状态
+    // ===== 分段传输（协议 v2） =====
+    protocolVersion: 2,
+    // requestId -> { doc, noteId }，手机按字符区间读取时复用段表，避免每次重扫
+    __openDocs: {},
+    // 当前分片上传状态；同一时间只允许一个上传
+    __upload: null,
+    // 请求序号，保证同一毫秒内多次请求也不冲突
+    __reqSeq: 0
   },
 
   onInit() {
@@ -136,11 +145,15 @@ export default {
     this.connect.onclose = (data) => {
       console.log(`连接已关闭, reason = ${data.data}, code = ${data.code}`);
       this.isConnected = false;
+      this.__openDocs = {};
+      this.cleanupUpload(this.__upload);
     };
 
     this.connect.onerror = (data) => {
       console.log(`连接错误, errMsg = ${data.data}, errCode = ${data.code}`);
       this.isConnected = false;
+      this.__openDocs = {};
+      this.cleanupUpload(this.__upload);
     };
 
     // 注册消息接收回调
@@ -167,6 +180,27 @@ export default {
         break
       case 'request_full_note':
         this.sendFullNote(message.noteId)
+        break
+      case 'note_open':
+        this.handleNoteOpen(message)
+        break
+      case 'note_read':
+        this.handleNoteRead(message)
+        break
+      case 'note_close':
+        this.handleNoteClose(message)
+        break
+      case 'note_write_begin':
+        this.handleWriteBegin(message)
+        break
+      case 'note_write_chunk':
+        this.handleWriteChunk(message)
+        break
+      case 'note_write_commit':
+        this.handleWriteCommit(message)
+        break
+      case 'note_write_abort':
+        this.handleWriteAbort(message)
         break
       case 'update_note':
         this.updateNote(message.noteId, message.content)
@@ -216,6 +250,7 @@ export default {
           this.connect.send({
             data: {
               type: 'notes_preview',
+              protocol: this.protocolVersion,
               previews: []
             },
             success: () => { console.log('笔记预览发送成功（空）') },
@@ -237,13 +272,16 @@ export default {
 
             previews.push({
               id: noteId,
-              preview: preview
+              preview: preview,
+              createTime: (metadata.notes[noteId] && metadata.notes[noteId].createTime) || 0,
+              modifyTime: (metadata.notes[noteId] && metadata.notes[noteId].modifyTime) || 0
             })
 
             if (loadedCount === totalCount) {
               this.connect.send({
                 data: {
                   type: 'notes_preview',
+                  protocol: this.protocolVersion,
                   previews: previews
                 },
                 success: () => { console.log('笔记预览发送成功') },
@@ -286,6 +324,408 @@ export default {
         })
       })
     })
+  },
+
+  // ===== 协议 v2：按字符区间读取（内部映射到 128 字节文本段） =====
+
+  sendMessage(data, label) {
+    if (!this.connect) return
+    this.connect.send({
+      data: data,
+      success: () => {},
+      fail: (res) => {
+        console.log(`发送${label || (data && data.type) || '消息'}失败, 错误码 = ${res && res.code}`)
+      }
+    })
+  },
+
+  nextRequestId(prefix) {
+    this.__reqSeq = (this.__reqSeq || 0) + 1
+    return `${prefix}_${Date.now()}_${this.__reqSeq}`
+  },
+
+  sendNoteError(requestId, noteId, error) {
+    this.sendMessage({
+      type: 'note_error',
+      requestId: requestId || '',
+      noteId: noteId || '',
+      error: error || '读取失败'
+    }, '分段错误')
+  },
+
+  // 打开笔记：只读 idx 建段表（缺失时才扫描重建），不把全文读进内存。
+  handleNoteOpen(message) {
+    const requestId = message.requestId
+    const noteId = message.noteId
+    if (!requestId || !noteId) {
+      this.sendNoteError(requestId, noteId, '参数错误')
+      return
+    }
+    const uri = `internal://files/note_${noteId}.txt`
+    import('@system.file').then(file => {
+      const f = file.default || file
+      f.get({
+        uri: uri,
+        success: () => {
+          openDoc(uri, DEFAULT_SEG_BYTES, (err, doc) => {
+            if (err || !doc) {
+              this.sendNoteError(requestId, noteId, err ? (err.message || '打开失败') : '打开失败')
+              return
+            }
+            this.__openDocs[requestId] = { doc, noteId }
+            this.sendMessage({
+              type: 'note_meta',
+              requestId: requestId,
+              noteId: noteId,
+              segBytes: doc.segBytes,
+              totalBytes: doc.totalBytes,
+              charCount: doc.charCount,
+              segmentCount: doc.segments.length
+            }, '笔记元数据')
+          })
+        },
+        fail: () => {
+          this.sendMessage({
+            type: 'note_not_found',
+            requestId: requestId,
+            noteId: noteId
+          }, '笔记不存在')
+        }
+      })
+    }).catch(err => {
+      this.sendNoteError(requestId, noteId, err && err.message ? err.message : '文件系统异常')
+    })
+  },
+
+  // 手机按 [from, from+count) 字符读取。这里用 locate/loadRange 只加载覆盖到的段，
+  // 发完当前窗口后再 setWindow 逐出，避免长笔记常驻内存。
+  handleNoteRead(message) {
+    const requestId = message.requestId
+    const noteId = message.noteId
+    if (!requestId || !noteId) {
+      this.sendNoteError(requestId, noteId, '参数错误')
+      return
+    }
+
+    this.withOpenDoc(requestId, noteId, (openErr, entry) => {
+      if (openErr || !entry) {
+        this.sendNoteError(requestId, noteId, openErr && openErr.message ? openErr.message : '打开失败')
+        return
+      }
+      const doc = entry.doc
+      if (!doc || doc.charCount < 0) {
+        this.sendNoteError(requestId, noteId, '文档未就绪')
+        return
+      }
+
+      let from = Math.floor(Number(message.from) || 0)
+      if (from < 0) from = 0
+      if (from > doc.charCount) from = doc.charCount
+      let count = Math.floor(Number(message.count) || 2048)
+      if (count < 1) count = 1
+      if (count > 8192) count = 8192
+      let end = Math.min(doc.charCount, from + count)
+
+      if (from >= doc.charCount) {
+        this.sendMessage({
+          type: 'note_chunk',
+          requestId: requestId,
+          noteId: noteId,
+          from: from,
+          text: '',
+          done: true
+        }, '笔记分片')
+        this.handleNoteClose({ requestId: requestId })
+        return
+      }
+
+      const locA = locate(doc, from)
+      const locB = locate(doc, Math.max(from, end - 1))
+      // 多加载一段：用于判断 end 是否把一个代理对（emoji 等）切在两段之间。
+      const loadTo = Math.min(doc.segments.length - 1, locB.index + 1)
+
+      loadRange(doc, locA.index, loadTo, (loadErr) => {
+        if (loadErr) {
+          this.sendNoteError(requestId, noteId, loadErr.message || '读取分段失败')
+          return
+        }
+        let text = getRange(doc, from, end)
+        if (end < doc.charCount && text.length > 0) {
+          const next = getRange(doc, end, end + 1)
+          const last = text.charCodeAt(text.length - 1)
+          if (next && next.length > 0 &&
+              last >= 0xD800 && last <= 0xDBFF &&
+              next.charCodeAt(0) >= 0xDC00 && next.charCodeAt(0) <= 0xDFFF) {
+            text += next
+            end += 1
+          }
+        }
+        const done = end >= doc.charCount
+        this.sendMessage({
+          type: 'note_chunk',
+          requestId: requestId,
+          noteId: noteId,
+          from: from,
+          text: text,
+          done: done
+        }, '笔记分片')
+        // 只保留当前窗口，干净段下次需要时再从磁盘读
+        setWindow(doc, locA.index, locB.index)
+        if (done) {
+          this.handleNoteClose({ requestId: requestId })
+        }
+      })
+    })
+  },
+
+  handleNoteClose(message) {
+    if (!message || !message.requestId) return
+    delete this.__openDocs[message.requestId]
+  },
+
+  withOpenDoc(requestId, noteId, callback) {
+    const cached = this.__openDocs[requestId]
+    if (cached) {
+      callback(null, cached)
+      return
+    }
+    const uri = `internal://files/note_${noteId}.txt`
+    openDoc(uri, DEFAULT_SEG_BYTES, (err, doc) => {
+      if (err || !doc) {
+        callback(err || new Error('打开失败'))
+        return
+      }
+      const entry = { doc: doc, noteId: noteId }
+      this.__openDocs[requestId] = entry
+      callback(null, entry)
+    })
+  },
+
+  // ===== 协议 v2：手机分片上传，手环导入为分段笔记 =====
+
+  handleWriteBegin(message) {
+    const requestId = message.requestId
+    if (!requestId) {
+      this.sendNoteError('', message.noteId, '上传请求缺少 requestId')
+      return
+    }
+    // 同一时间只允许一个上传；旧会话直接丢弃，避免临时文件互相覆盖
+    this.cleanupUpload(this.__upload)
+
+    const tmpUri = `internal://files/upload_${requestId}.txt`
+    const upload = {
+      requestId: requestId,
+      noteId: message.noteId || null,
+      tmpUri: tmpUri,
+      expectedBytes: Number(message.totalBytes) || 0,
+      expectedChars: Number(message.charCount) || 0,
+      bytes: 0,
+      chars: 0,
+      seq: -1,
+      pendingSeq: null,
+      chain: Promise.resolve(),
+      committing: false
+    }
+    this.__upload = upload
+
+    import('@system.file').then(file => {
+      const f = file.default || file
+      const createEmpty = () => {
+        f.writeText({
+          uri: tmpUri,
+          text: '',
+          success: () => {
+            this.sendMessage({
+              type: 'note_write_ready',
+              requestId: requestId,
+              noteId: upload.noteId || ''
+            }, '上传就绪')
+          },
+          fail: (data, code) => {
+            this.failUpload('创建临时文件失败 ' + code)
+          }
+        })
+      }
+      f.delete({
+        uri: tmpUri,
+        success: createEmpty,
+        fail: createEmpty
+      })
+      f.delete({ uri: tmpUri + '.idx', success: () => {}, fail: () => {} })
+    }).catch(err => {
+      this.failUpload('文件系统异常: ' + (err && err.message ? err.message : err))
+    })
+  },
+
+  handleWriteChunk(message) {
+    const upload = this.__upload
+    if (!upload || upload.requestId !== message.requestId) {
+      this.sendMessage({
+        type: 'note_write_error',
+        requestId: message.requestId || '',
+        noteId: message.noteId || '',
+        error: '上传会话不存在或已结束'
+      }, '上传错误')
+      return
+    }
+
+    const seq = Math.floor(Number(message.seq))
+    if (!(seq >= 0)) {
+      this.failUpload('分片序号非法')
+      return
+    }
+    // 重传：已经写过的片直接补 ACK，避免重复追加。
+    if (seq <= upload.seq) {
+      this.sendMessage({ type: 'note_write_ack', requestId: upload.requestId, seq: seq }, '上传 ACK')
+      return
+    }
+    // 正在写同一片（手机超时重传）时忽略，写完后会统一 ACK。
+    if (upload.pendingSeq === seq) {
+      return
+    }
+    if (seq !== upload.seq + 1) {
+      this.failUpload('分片序号不连续')
+      return
+    }
+
+    const text = typeof message.text === 'string' ? message.text : ''
+    upload.pendingSeq = seq
+    upload.chain = upload.chain.then(() => new Promise((resolve) => {
+      if (this.__upload !== upload) {
+        resolve()
+        return
+      }
+      import('@system.file').then(file => {
+        const f = file.default || file
+        f.writeText({
+          uri: upload.tmpUri,
+          text: text,
+          append: seq > 0,
+          success: () => {
+            upload.seq = seq
+            upload.pendingSeq = null
+            upload.bytes += utf8ByteLength(text)
+            upload.chars += text.length
+            this.sendMessage({
+              type: 'note_write_ack',
+              requestId: upload.requestId,
+              seq: seq
+            }, '上传 ACK')
+            resolve()
+          },
+          fail: (data, code) => {
+            upload.pendingSeq = null
+            resolve()
+            this.failUpload('写入临时文件失败 ' + code)
+          }
+        })
+      }).catch(err => {
+        upload.pendingSeq = null
+        resolve()
+        this.failUpload('文件系统异常: ' + (err && err.message ? err.message : err))
+      })
+    }))
+  },
+
+  handleWriteCommit(message) {
+    const upload = this.__upload
+    if (!upload || upload.requestId !== message.requestId) {
+      this.sendMessage({
+        type: 'note_write_error',
+        requestId: message.requestId || '',
+        noteId: message.noteId || '',
+        error: '上传会话不存在或已结束'
+      }, '上传错误')
+      return
+    }
+    if (upload.committing) return
+    upload.committing = true
+
+    upload.chain.then(() => {
+      if (this.__upload !== upload) return
+      if (upload.expectedBytes > 0 && upload.bytes !== upload.expectedBytes) {
+        this.failUpload(`字节数不一致（收到 ${upload.bytes}，期望 ${upload.expectedBytes}）`)
+        return
+      }
+      if (upload.expectedChars > 0 && upload.chars !== upload.expectedChars) {
+        this.failUpload(`字符数不一致（收到 ${upload.chars}，期望 ${upload.expectedChars}）`)
+        return
+      }
+
+      const noteId = upload.noteId || Date.now().toString()
+      const created = !upload.noteId
+      const dstUri = `internal://files/note_${noteId}.txt`
+
+      importTextFile(upload.tmpUri, dstUri, DEFAULT_SEG_BYTES, (importErr) => {
+        if (this.__upload !== upload) return
+        if (importErr) {
+          this.failUpload('导入分段失败: ' + (importErr.message || importErr))
+          return
+        }
+
+        import('../Common/utils.js').then(utils => {
+          utils.readMetadata((err, metadata) => {
+            if (err || !metadata) metadata = { notes: {} }
+            if (!metadata.notes) metadata.notes = {}
+            const now = Date.now()
+            if (!metadata.notes[noteId]) {
+              metadata.notes[noteId] = { createTime: now, modifyTime: now }
+            } else {
+              metadata.notes[noteId].modifyTime = now
+            }
+            utils.saveMetadata(metadata, (saveErr) => {
+              if (saveErr) {
+                this.failUpload('保存元数据失败')
+                return
+              }
+              this.sendMessage({
+                type: 'note_write_success',
+                requestId: upload.requestId,
+                noteId: noteId,
+                created: created
+              }, '上传成功')
+              this.cleanupUpload(upload)
+              this.loadNotes()
+            })
+          })
+        }).catch(err => {
+          this.failUpload('读取元数据异常: ' + (err && err.message ? err.message : err))
+        })
+      })
+    }).catch((err) => {
+      this.failUpload('提交异常: ' + (err && err.message ? err.message : err))
+    })
+  },
+
+  handleWriteAbort(message) {
+    const upload = this.__upload
+    if (!upload) return
+    if (message && message.requestId && message.requestId !== upload.requestId) return
+    this.cleanupUpload(upload)
+  },
+
+  failUpload(error) {
+    const upload = this.__upload
+    if (!upload) return
+    this.sendMessage({
+      type: 'note_write_error',
+      requestId: upload.requestId,
+      noteId: upload.noteId || '',
+      error: error || '保存失败'
+    }, '上传错误')
+    this.cleanupUpload(upload)
+  },
+
+  cleanupUpload(upload) {
+    if (!upload) return
+    if (this.__upload === upload) {
+      this.__upload = null
+    }
+    import('@system.file').then(file => {
+      const f = file.default || file
+      f.delete({ uri: upload.tmpUri, success: () => {}, fail: () => {} })
+      f.delete({ uri: upload.tmpUri + '.idx', success: () => {}, fail: () => {} })
+    }).catch(() => {})
   },
 
   // 更新笔记
@@ -457,6 +897,9 @@ export default {
       clearInterval(this.timeUpdateTimer)
       this.timeUpdateTimer = null
     }
+    // 释放未完成的分段会话与临时文件
+    this.__openDocs = {}
+    this.cleanupUpload(this.__upload)
     // 移除设置变化监听器
     if (this.settingsChangeHandler) {
       removeSettingsListener(this.settingsChangeHandler);
