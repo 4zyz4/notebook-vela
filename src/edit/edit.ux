@@ -190,7 +190,7 @@ import router from '@system.router'
 import prompt from '@system.prompt'
 import vibrator from '@system.vibrator'
 import {notifyNotesChange, getCachedSettings } from '../Common/utils.js'
-import { createDocFromText, openDoc, getRange, insertText, deleteRange, locate, materialize, writeDocToUri, commitDoc, loadRange, setWindow, isLoaded } from '../Common/textSegments.js'
+import { createDocFromText, openDoc, getRange, insertText, deleteBackward, prevCharPos, nextCharPos, locate, materialize, writeDocToUri, commitDoc, loadRange, setWindow, isLoaded } from '../Common/textSegments.js'
 
 // 调试用：单段字节长度（正式值为 512，调小便于观察分段/翻段行为）
 const SEG_BYTES = 128
@@ -213,6 +213,7 @@ export default {
     currentTime: "",
     borderWidth: '10px', // 默认边框宽度
     fromRecovery: false, // 是否从恢复文件进入
+    loadFailed: false, // 既有笔记读取失败：禁止保存，避免覆盖原内容
 
     // 分段窗口渲染（最多 3 段）
     winStart: 0,
@@ -317,7 +318,11 @@ export default {
     if (this.noteId) {
       openDoc(`internal://files/note_${this.noteId}.txt`, SEG_BYTES, (err, doc) => {
         if (err || !doc) {
-          this.__doc = createDocFromText(this.content || '', SEG_BYTES, '');
+          // 读取失败绝不能当成空笔记：否则用户继续输入并保存会覆盖原内容
+          console.error('打开笔记失败:', err);
+          this.loadFailed = true;
+          this.__doc = createDocFromText('', SEG_BYTES, '');
+          prompt.showToast({ message: '笔记读取失败，请返回重试' });
         } else {
           this.__doc = doc;
         }
@@ -370,13 +375,13 @@ export default {
   ensureCursorLoaded(cb) {
     const doc = this.__doc;
     if (!doc) {
-      if (cb) cb();
+      if (cb) cb(new Error('文档未就绪'));
       return;
     }
     const idx = locate(doc, this.cursorPosition).index;
     loadRange(doc, idx - 1, idx + 1, (err) => {
       if (err) console.error('加载游标分段失败:', err);
-      if (cb) cb();
+      if (cb) cb(err);
     });
   },
 
@@ -645,17 +650,23 @@ export default {
     console.log('切换输入法显示状态成功');
   },
   
-  // 移动光标
+  // 移动光标（emoji 等代理对按一个字符移动，不会停在半个字符上）
   moveCursor(direction) {
     if (direction === 'left' && this.cursorPosition > 0) {
-      this.cursorPosition--;
-      if (this.vibrateMode) {
-        vibrator.vibrate({ mode: this.vibrateMode });
+      const next = prevCharPos(this.__doc, this.cursorPosition);
+      if (next < this.cursorPosition) {
+        this.cursorPosition = next;
+        if (this.vibrateMode) {
+          vibrator.vibrate({ mode: this.vibrateMode });
+        }
       }
     } else if (direction === 'right' && this.cursorPosition < this.textLength()) {
-      this.cursorPosition++;
-      if (this.vibrateMode) {
-        vibrator.vibrate({ mode: this.vibrateMode });
+      const next = nextCharPos(this.__doc, this.cursorPosition);
+      if (next > this.cursorPosition) {
+        this.cursorPosition = next;
+        if (this.vibrateMode) {
+          vibrator.vibrate({ mode: this.vibrateMode });
+        }
       }
     }
   },
@@ -765,11 +776,20 @@ export default {
       // 记录删除前游标是否可见，仅此时才允许窗口跟随分段合并
       const cursorVisible = this.isCursorInWindow();
 
-      this.ensureCursorLoaded(() => {
+      this.ensureCursorLoaded((err) => {
+        if (err) {
+          prompt.showToast({ message: '内容加载失败，请重试' });
+          return;
+        }
         // 删除光标前的字符
         if (this.cursorPosition > 0) {
-          deleteRange(this.__doc, this.cursorPosition - 1, 1);
-          this.cursorPosition--;
+          // 代理对（emoji 等）整对删除；删除失败时不移动光标，否则光标与文本会永久错位
+          const next = deleteBackward(this.__doc, this.cursorPosition);
+          if (next === this.cursorPosition) {
+            prompt.showToast({ message: '删除失败，请重试' });
+            return;
+          }
+          this.cursorPosition = next;
           this.isSaved = false;
           this._recoveryDirty = true;
         }
@@ -807,10 +827,18 @@ export default {
         // 记录插入前游标是否可见，仅此时才允许窗口跟随分段拆分
         const cursorVisible = this.isCursorInWindow();
 
-        this.ensureCursorLoaded(() => {
-          // 在光标位置插入内容
-          insertText(this.__doc, this.cursorPosition, content);
-          this.cursorPosition += content.length;
+        this.ensureCursorLoaded((err) => {
+          if (err) {
+            prompt.showToast({ message: '内容加载失败，请重试' });
+            return;
+          }
+          // 插入失败（-1）时不要移动光标，否则输入会静默丢失且光标错位
+          const next = insertText(this.__doc, this.cursorPosition, content);
+          if (next < 0) {
+            prompt.showToast({ message: '输入失败，请重试' });
+            return;
+          }
+          this.cursorPosition = next;
           
           // 标记为未保存
           this.isSaved = false;
@@ -906,6 +934,12 @@ export default {
   
   // 保存到文件的核心方法：流式重写（脏段取内存、干净段从旧文件读回），避免拼出整串
   saveToFile() {
+    // 笔记读取失败时禁止落盘：空文档会把原文件覆盖掉
+    if (this.loadFailed) {
+      this.isSaving = false;
+      prompt.showToast({ message: '笔记读取失败，已阻止保存' });
+      return;
+    }
     import('../Common/utils.js').then(utils => {
       try {
         const modifyTime = Date.now();
