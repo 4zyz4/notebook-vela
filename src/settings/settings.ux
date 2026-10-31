@@ -52,6 +52,18 @@
       
       <list-item type="item" class="setting-item">
         <div class="setting-content">
+          <text class="setting-label">键盘布局</text>
+          <text class="setting-description">输入法键盘的按键布局</text>
+          <input 
+            type="button" 
+            class="setting-button" 
+            value="{{keyboardLayout === 'T9' ? '9键' : '26键'}}" 
+            onclick="toggleKeyboardLayout"/>
+        </div>
+      </list-item>
+      
+      <list-item type="item" class="setting-item">
+        <div class="setting-content">
           <text class="setting-label">边框宽度</text>
           <text class="setting-description">编辑页左右两侧的边框宽度</text>
           <input 
@@ -76,6 +88,7 @@ export default {
     timeDisplayType: 'createTime', // createTime 或 modifyTime
     autoScrollType: 'oneBlank', // oneBlank 或 twoBlank
     borderWidth: '10px', // 0px, 10px 或 20px
+    keyboardLayout: 'QWERTY', // QWERTY（26键）或 T9（9键）
     timeUpdateTimer: null, // 添加定时器变量
     currentTime: '' // 添加当前时间变量
   },
@@ -126,6 +139,7 @@ export default {
         this.timeDisplayType = settings.timeDisplayType || 'createTime';
         this.autoScrollType = settings.autoScrollType || 'oneBlank';
         this.borderWidth = settings.borderWidth || '10px';
+        this.keyboardLayout = settings.keyboardLayout === 'T9' ? 'T9' : 'QWERTY';
       }
     });
   },
@@ -136,7 +150,8 @@ export default {
       vibrationEnabled: this.vibrationEnabled,
       timeDisplayType: this.timeDisplayType,
       autoScrollType: this.autoScrollType,
-      borderWidth: this.borderWidth
+      borderWidth: this.borderWidth,
+      keyboardLayout: this.keyboardLayout
     };
 
     saveSettings(settings, (err) => {
@@ -193,6 +208,13 @@ export default {
     } else {
       this.autoScrollType = 'noBlank';
     }
+    // 立即保存设置
+    this.saveCurrentSettings();
+    this.$forceUpdate();
+  },
+
+  toggleKeyboardLayout() {
+    this.keyboardLayout = this.keyboardLayout === 'T9' ? 'QWERTY' : 'T9';
     // 立即保存设置
     this.saveCurrentSettings();
     this.$forceUpdate();

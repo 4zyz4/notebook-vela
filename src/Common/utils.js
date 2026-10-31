@@ -53,7 +53,8 @@ function getDefaultSettings() {
     vibrationEnabled: true,
     timeDisplayType: 'createTime',
     autoScrollType: 'oneBlank',
-    borderWidth: '10px'
+    borderWidth: '10px',
+    keyboardLayout: 'QWERTY'
   };
 }
 
