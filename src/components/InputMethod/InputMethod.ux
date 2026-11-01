@@ -215,6 +215,10 @@ export default {
     this.currentSchema = schemaOptions[this.schemaSelected].id
     this.replaceActiveSchema(schemaOptions[this.schemaSelected])
     this.adjustScreenWidth()
+    // 词库为异步加载：加载完成（单字表或某个整词分片就绪）后重算一次候选。
+    SimpleInputMethod.onDictionaryReady = () => {
+      this.onDictionaryReady();
+    };
     // 字典懒初始化：进入页面时键盘隐藏(hide=true)，无需建词索引；首次弹出(hide→false)时才 initDict。
     if (!this.hide) {
       // 挂载即展开的用法：键盘子树直接创建并保活
@@ -554,7 +558,17 @@ export default {
   },
   // 组件销毁：释放词库，避免模块级缓存常驻导致泄漏
   onDestroy() {
+    if (SimpleInputMethod.onDictionaryReady) {
+      SimpleInputMethod.onDictionaryReady = null;
+    }
     SimpleInputMethod.releaseWords();
+  },
+  // 词库异步加载完成：重算当前输入的候选（未在输入中则无需处理）
+  onDictionaryReady() {
+    if (this.hide) return;
+    if (this.cval || this.lastWaitingStr) {
+      this.resetResultList();
+    }
   },
   // 字典懒初始化入口（幂等，只跑一次）。initDict 内部还有 syllableSet 幂等守卫。
   _ensureDictInit() {
