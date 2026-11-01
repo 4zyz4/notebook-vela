@@ -1,7 +1,7 @@
 {
   "package": "com.zyz4.notebook",
   "name": "笔记本",
-  "versionName": "2.2.0",
+  "versionName": "2.2.1",
   "versionCode": 23,
   "icon": "/Common/logo.png",
   "deviceTypeList": ["watch"],
