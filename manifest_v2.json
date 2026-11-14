@@ -1,0 +1,85 @@
+{
+  "item": {
+    "id": "com.zyz4.notebook",
+    "restype": "quick_app",
+    "name": "笔记本",
+    "description": "为小米手环打造的腕上笔记本。26 键 / 9 键全键盘输入，支持拼音与多种双拼方案；长文分段存储、按需加载，编辑长笔记依旧顺滑；连接手机端笔记管理器后，可一键导入导出与分段同步。\n\n适配说明：小米手环 10 / 10 NFC 使用 2.2.0；小米手环 11 / 11 NFC 使用 2.0.0。\n米坛帖子：https://www.bandbbs.cn/threads/26699/\nQQ 群：780301769",
+    "preview": [
+      "astrobox/preview-1.png",
+      "astrobox/preview-2.png",
+      "astrobox/preview-3.png",
+      "astrobox/preview-4.png"
+    ],
+    "icon": "astrobox/icon.png",
+    "cover": "astrobox/cover.png",
+    "author": [
+      {
+        "name": "4zyz4"
+      }
+    ]
+  },
+  "links": [
+    {
+      "icon": "chat-circle-text",
+      "title": "米坛帖子",
+      "url": "https://www.bandbbs.cn/threads/26699/"
+    },
+    {
+      "icon": "users-three",
+      "title": "QQ 群：780301769",
+      "url": "https://qm.qq.com/q/780301769"
+    },
+    {
+      "icon": "github-logo",
+      "title": "开源仓库",
+      "url": "https://github.com/4zyz4/notebook-vela"
+    }
+  ],
+  "downloads": {
+    "xmb10": {
+      "version": "2.2.0",
+      "file_name": "astrobox/notebook-2.2.0-xmb10.rpk",
+      "versionCode": 23,
+      "updatelogs": [
+        {
+          "version": "2.2.0",
+          "content": "文本分段架构落地：按需加载、流式保存，长笔记不再整篇驻留内存；输入法支持双拼与 9/26 键布局；自动滚动触发时机调整。"
+        }
+      ]
+    },
+    "xmb10nfc": {
+      "version": "2.2.0",
+      "file_name": "astrobox/notebook-2.2.0-xmb10.rpk",
+      "versionCode": 23,
+      "updatelogs": [
+        {
+          "version": "2.2.0",
+          "content": "文本分段架构落地：按需加载、流式保存，长笔记不再整篇驻留内存；输入法支持双拼与 9/26 键布局；自动滚动触发时机调整。"
+        }
+      ]
+    },
+    "xmb11": {
+      "version": "2.0.0",
+      "file_name": "astrobox/notebook-2.0.0-xmb11.rpk",
+      "versionCode": 20,
+      "updatelogs": [
+        {
+          "version": "2.0.0",
+          "content": "适配小米手环 11 的稳定版本，支持笔记编辑、手机连接与全部基础功能。"
+        }
+      ]
+    },
+    "xmb11nfc": {
+      "version": "2.0.0",
+      "file_name": "astrobox/notebook-2.0.0-xmb11.rpk",
+      "versionCode": 20,
+      "updatelogs": [
+        {
+          "version": "2.0.0",
+          "content": "适配小米手环 11 NFC 的稳定版本，支持笔记编辑、手机连接与全部基础功能。"
+        }
+      ]
+    }
+  },
+  "ext": {}
+}
