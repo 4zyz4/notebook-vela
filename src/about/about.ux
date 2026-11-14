@@ -37,6 +37,14 @@
         </div>
     </list-item>
 
+    <list-item type="section" class="section" style="height: 170px;">
+      <!-- 鸣谢 -->
+        <text class="section-title">鸣谢</text>
+        <div class="gesture-item">
+          <text class="thanks-text">感谢参与小米手环 11 调试的群友</text>
+        </div>
+    </list-item>
+
     </list>
   </div>
 </template>
@@ -214,5 +222,13 @@
   .reward-image {
     width: 160px;
     height: 160px;
+  }
+
+  .thanks-text {
+    width: 100%;
+    font-size: 18px;
+    color: #999999;
+    text-align: center;
+    lines: 2;
   }
 </style>
