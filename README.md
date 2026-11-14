@@ -49,10 +49,10 @@
 ## 预览
 
 <p align="center">
-  <img src="astrobox/preview-1.png" width="22%" alt="笔记列表" />
-  <img src="astrobox/preview-2.png" width="22%" alt="编辑笔记" />
-  <img src="astrobox/preview-3.png" width="22%" alt="输入法" />
-  <img src="astrobox/preview-4.png" width="22%" alt="设置" />
+  <img src="docs/images/preview-1.png" width="22%" alt="笔记列表" />
+  <img src="docs/images/preview-2.png" width="22%" alt="编辑笔记" />
+  <img src="docs/images/preview-3.png" width="22%" alt="输入法" />
+  <img src="docs/images/preview-4.png" width="22%" alt="设置" />
 </p>
 
 ## 兼容性
@@ -64,8 +64,7 @@
 | 手机端系统 | Android 10+（`minSdk 29`，`targetSdk 35`） |
 | 通信方式 | 小米穿戴 SDK `xms-wearable-lib_1.4_release.aar` + `@system.interconnect` |
 
-> 不同型号的发布包版本可能不同，以上架信息 `manifest_v2.json` 与 `astrobox/` 中的
-> `.rpk` 为准。
+> 不同机型的发布包版本可能不同，请以对应版本的源码构建产物为准。
 
 ## 目录结构
 
@@ -86,15 +85,14 @@ notebook_app/
 │  ├─ app/libs/                小米穿戴 SDK
 │  └─ README.md                Android 端构建与协议说明
 ├─ docs/
-│  └─ segmented-transfer-v2.md 笔记同步协议 v2
+│  ├─ segmented-transfer-v2.md 笔记同步协议 v2
+│  └─ images/                  预览截图
 ├─ tools/
 │  ├─ gen-dictionary.js        词库生成脚本
 │  └─ dictionary-source/       旧版 JS 词库源
-├─ astrobox/                   AstroBox 上架素材与历史发布包
 ├─ sign/                       手环端签名证书（仅本地保留，不入库）
 ├─ dist/                       构建产物
-├─ build.cmd                   手环端打包命令
-└─ manifest_v2.json            AstroBox 上架信息
+└─ build.cmd                   手环端打包命令
 ```
 
 ## 构建
