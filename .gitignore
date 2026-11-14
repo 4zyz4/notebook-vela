@@ -5,3 +5,11 @@ dist
 .gradle
 local.properties
 .idea
+
+# 本地签名材料：仅保留在开发机，绝不入库
+sign/private.pem
+sign/certificate.pem
+android/keystore/
+
+# 小米 Vela 官方文档：版权归小米，仅作本地参考
+mi_vela_guide.md

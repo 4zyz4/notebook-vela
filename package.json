@@ -1,4 +1,18 @@
 {
+  "name": "notebook-vela",
+  "version": "2.2.3",
+  "private": true,
+  "description": "为小米手环打造的腕上笔记本（Vela 快应用 + Android 笔记管理器）",
+  "author": "4zyz4",
+  "license": "GPL-3.0-or-later",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/4zyz4/notebook-vela.git"
+  },
+  "scripts": {
+    "build": "aiot release --enable-jsc",
+    "build:dict": "node tools/gen-dictionary.js"
+  },
   "dependencies": {
     "@aiot-toolkit/jsc": "^1.0.8",
     "aiot-toolkit": "^2.0.5",

@@ -15,6 +15,7 @@
         <text class="app-name">笔记本</text>
         <text class="info">版本 2.2.3</text>
         <text class="info">作者:4zyz4</text>
+        <text class="info">开源协议: GPL-3.0</text>
     </list-item> 
 
     <list-item type="section" class="section" style="height: 230px;">

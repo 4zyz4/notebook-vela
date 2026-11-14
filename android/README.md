@@ -3,6 +3,10 @@
 这是根据 `C:\Users\4zyz4\Desktop\笔记管理器.apk`（versionCode 6 / 1.0.2）
 逆向整理并重写的 Android 客户端，配合本仓库的手环端（Vela 快应用）使用。
 
+> 本项目采用 GPL-3.0-or-later 发布，详见根目录 [LICENSE](../LICENSE)。
+> 其中 `app/libs/xms-wearable-lib_1.4_release.aar` 为小米穿戴 SDK（专有软件），
+> 不适用 GPL 授权。
+
 ## 1. 目录
 
 ```
@@ -21,7 +25,7 @@ android/
 │  │  ├─ NotePreview.java
 │  │  └─ NoteAdapter.java
 │  └─ src/main/res/               深色 UI、图标、连接状态矢量图
-├─ keystore/notebook.p12         由 sign/private.pem + sign/certificate.pem 生成
+├─ keystore/notebook.p12         本地签名材料（由本地 sign/*.pem 生成，不入库）
 ├─ gradle/                       Gradle 9.7.1 wrapper
 └─ build.gradle / settings.gradle
 ```
@@ -41,18 +45,16 @@ cd android
 android/app/build/outputs/apk/release/app-release.apk
 ```
 
-仓库里已经放了一份构建结果：
-
-```
-dist/com.zyz4.notebook.release.2.2.3.apk
-```
+如需分发包，可将 APK 复制到根目录 `dist/`（该目录已被 `.gitignore` 忽略）。
 
 ## 3. 签名与包名
 
 - 包名：`com.zyz4.notebook`，与手环 `src/manifest.json` 的 `package` 必须完全一致。
-- 签名：`android/keystore/notebook.p12` 由仓库内 `sign/private.pem` 和
+- 签名：`android/keystore/notebook.p12` 由本地 `sign/private.pem` 和
   `sign/certificate.pem` 生成；证书 SHA-256 与原 APK 一致：
   `483ebb32069ff38f6a44be4d79028d96539a9afa8746b92b2b1fbb2351bc7ffc`。
+- 签名材料（`sign/*.pem` 与 `android/keystore/`）已加入 `.gitignore`，
+  不再随仓库分发，请自行保管。
 - 因此新 APK 可以直接覆盖安装旧版（versionCode 8 > 6），并且能与手环 RPK 建立
   interconnect 通信。
 
