@@ -53,6 +53,10 @@ public final class NoteLink {
     private static final int WRITE_CHUNK_BYTES = 2048;
 
     private static final long HANDSHAKE_TIMEOUT_MS = 12_000;
+    /** 拉起手环应用后给 Vela 注册 interconnect 监听留出的启动时间。 */
+    private static final long WEAR_APP_START_DELAY_MS = 2_000;
+    /** 拉起手环应用失败或长时间无回调时，仍继续尝试握手。 */
+    private static final long WEAR_APP_LAUNCH_TIMEOUT_MS = 8_000;
     private static final long CONNECT_RETRY_DELAY_MS = 5_000;
     private static final long DOWNLOAD_META_TIMEOUT_MS = 15_000;
     private static final long DOWNLOAD_CHUNK_TIMEOUT_MS = 20_000;
@@ -123,7 +127,13 @@ public final class NoteLink {
     private boolean connecting;
     private boolean handshaken;
     private boolean handshakePending;
+    /** 本次连接流程对应的 attemptSeq，用于丢弃旧流程延迟执行的握手。 */
+    private int handshakeAttempt = -1;
+    private boolean handshakeSent;
     private int retryAttempts;
+
+    /** 手环端应用入口：不指定 path 时打开手环应用首页。 */
+    private final String wearAppUri;
 
     /**
      * 每发起一次连接流程递增；旧流程的异步回调发现序号变化后直接丢弃，
@@ -145,7 +155,15 @@ public final class NoteLink {
         if (!handshaken) {
             // 握手超时可能意味着 SDK 侧监听已失效，先注销，重试时再干净地注册一次。
             dropMessageListenerRegistration();
-            failConnection("连接超时，请确认手环已打开笔记本应用");
+            failConnection("连接超时，请在手环上打开笔记本应用");
+        }
+    };
+
+    private final Runnable launchTimeoutRunnable = () -> {
+        if (handshakePending && !handshakeSent) {
+            // 拉起回调缺失时不无限等待，继续握手；若手环已在前台仍可连上。
+            Log.w(TAG, "launch wear app timeout, handshake anyway");
+            sendHandshake(handshakeAttempt);
         }
     };
 
@@ -186,6 +204,7 @@ public final class NoteLink {
         authApi = Wearable.getAuthApi(app);
         messageApi = Wearable.getMessageApi(app);
         store = new LocalNoteStore(app);
+        wearAppUri = "hap://app/" + app.getPackageName();
     }
 
     // ===== 对外 API =====
@@ -336,6 +355,11 @@ public final class NoteLink {
             messageListenerRegistrationPending = false;
             connectionSubscribedNodeId = null;
             connectionSubscribingNodeId = null;
+            handshakePending = false;
+            handshakeAttempt = -1;
+            handshakeSent = false;
+            main.removeCallbacks(handshakeTimeoutRunnable);
+            main.removeCallbacks(launchTimeoutRunnable);
             failPending("应用退出");
             listeners.clear();
             ioExecutor.shutdown();
@@ -602,16 +626,69 @@ public final class NoteLink {
         }
     }
 
+    /**
+     * 握手前先主动拉起手环应用。
+     *
+     * <p>手环端只有在前台运行时才会注册 {@code @system.interconnect} 消息监听；
+     * 如果应用未打开，手机发出的握手会直接丢失。参考小米穿戴开放接口文档：
+     * {@code launchWearApp(nodeId, "hap://app/<package>")}。</p>
+     */
     private void startHandshake() {
         if (node == null || handshakePending) {
             return;
         }
         handshakePending = true;
         handshaken = false;
+        handshakeSent = false;
+        handshakeAttempt = attemptSeq;
+        setState(State.CONNECTING, "正在打开手环应用");
+        launchWearApp(handshakeAttempt);
+    }
+
+    private void launchWearApp(int attempt) {
+        final Node current = node;
+        if (current == null) {
+            failConnection("设备节点为空");
+            return;
+        }
+        try {
+            nodeApi.launchWearApp(current.id, wearAppUri)
+                    .addOnSuccessListener(v -> main.post(() -> onWearAppLaunched(attempt)))
+                    .addOnFailureListener(e -> main.post(() -> {
+                        // 部分设备/系统版本可能不支持拉起，仍继续握手兜底。
+                        Log.w(TAG, "launch wear app failed: " + safeMessage(e));
+                        onWearAppLaunched(attempt);
+                    }));
+            main.removeCallbacks(launchTimeoutRunnable);
+            main.postDelayed(launchTimeoutRunnable, WEAR_APP_LAUNCH_TIMEOUT_MS);
+        } catch (Exception e) {
+            Log.w(TAG, "launch wear app exception", e);
+            onWearAppLaunched(attempt);
+        }
+    }
+
+    private void onWearAppLaunched(int attempt) {
+        if (!isHandshakeCurrent(attempt) || handshakeSent || node == null) {
+            return;
+        }
+        main.removeCallbacks(launchTimeoutRunnable);
+        main.postDelayed(() -> sendHandshake(attempt), WEAR_APP_START_DELAY_MS);
+    }
+
+    private void sendHandshake(int attempt) {
+        if (!isHandshakeCurrent(attempt) || handshakeSent || node == null) {
+            return;
+        }
+        handshakeSent = true;
+        main.removeCallbacks(launchTimeoutRunnable);
         setState(State.CONNECTING, "正在与手环握手");
         sendRaw(NoteProtocol.handshake(0));
         main.removeCallbacks(handshakeTimeoutRunnable);
         main.postDelayed(handshakeTimeoutRunnable, HANDSHAKE_TIMEOUT_MS);
+    }
+
+    private boolean isHandshakeCurrent(int attempt) {
+        return handshakePending && attempt == handshakeAttempt && isCurrentAttempt(attempt);
     }
 
     private void failConnection(String message) {
@@ -619,6 +696,8 @@ public final class NoteLink {
         connecting = false;
         handshaken = false;
         handshakePending = false;
+        handshakeAttempt = -1;
+        handshakeSent = false;
         setState(State.FAILED, message);
         scheduleRetry();
     }
@@ -636,12 +715,15 @@ public final class NoteLink {
         connecting = false;
         handshaken = false;
         handshakePending = false;
+        handshakeAttempt = -1;
+        handshakeSent = false;
         // 使仍在途的旧流程回调失效，避免它们继续注册监听。
         attemptSeq++;
         messageListenerRegistrationPending = false;
         node = null;
         currentNodeName = null;
         main.removeCallbacks(handshakeTimeoutRunnable);
+        main.removeCallbacks(launchTimeoutRunnable);
         if (failTasks) {
             failPending("连接已断开");
         }
@@ -664,6 +746,11 @@ public final class NoteLink {
             if (status == DataSubscribeResult.RESULT_CONNECTION_DISCONNECTED) {
                 handshaken = false;
                 handshakePending = false;
+                handshakeAttempt = -1;
+                handshakeSent = false;
+                // 让断线前仍在途的拉起/握手回调失效，重连时重新拉起应用。
+                attemptSeq++;
+                main.removeCallbacks(launchTimeoutRunnable);
                 // 监听器已在 SDK 侧注册，重连时复用，重复 addListener 会产生多份回调。
                 setState(State.DISCONNECTED, "手环连接已断开");
                 failPending("手环连接已断开");
@@ -725,7 +812,10 @@ public final class NoteLink {
                 || NoteProtocol.TYPE_FULL_RESPONSE.equals(type))) {
             handshaken = true;
             handshakePending = false;
+            handshakeAttempt = -1;
+            handshakeSent = false;
             main.removeCallbacks(handshakeTimeoutRunnable);
+            main.removeCallbacks(launchTimeoutRunnable);
             setState(State.CONNECTED, null);
         }
 
@@ -878,8 +968,11 @@ public final class NoteLink {
         }
         handshaken = true;
         handshakePending = false;
+        handshakeAttempt = -1;
+        handshakeSent = false;
         connecting = false;
         main.removeCallbacks(handshakeTimeoutRunnable);
+        main.removeCallbacks(launchTimeoutRunnable);
         setState(State.CONNECTED, null);
         if (count + 1 < 3) {
             sendRaw(NoteProtocol.handshake(count + 1));

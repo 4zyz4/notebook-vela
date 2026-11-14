@@ -80,6 +80,10 @@ Android 端会优先使用协议 v2：
 - 读取：`request_full_note` / `full_note_response`；
 - 保存：`update_note` / `create_note`。
 
+握手前，Android 会先调用 `NodeApi.launchWearApp(nodeId, "hap://app/<package>")`
+主动打开手环应用，并等待约 2 秒让 Vela 注册好 interconnect 监听，再发送
+`__hs__`。这样用户无需先手动在手环上打开笔记应用。
+
 ## 5. 验证记录
 
 - `android/` 使用 AGP 9.4.1 + Gradle 9.7.1 构建通过（debug / release）。

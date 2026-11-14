@@ -48,10 +48,18 @@ Android 收到 `protocol >= 2` 时使用 v2；没有该字段时按旧协议处�
 `createTime` / `modifyTime` 为毫秒时间戳。Android 首页会为每条笔记同时显示这两个时间；
 旧版手环未提供时显示“未记录”。
 
-握手保持不变：
+握手报文保持不变：
 
 ```json
 {"tag":"__hs__","count":0}
+```
+
+但 Android 在发送握手前必须先通过小米穿戴 SDK 主动拉起手环应用，否则手环端
+尚未注册 `@system.interconnect` 消息监听，握手消息会丢失：
+
+```java
+nodeApi.launchWearApp(nodeId, "hap://app/" + packageName);
+// 等待 Vela 启动并注册监听后再发送 __hs__
 ```
 
 ## 3. 读取
