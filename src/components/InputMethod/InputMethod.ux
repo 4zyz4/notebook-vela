@@ -1,9 +1,9 @@
 <template>
-  <div class="page" style="flex-direction: column; height: {{hide ? '0px' : 'auto'}}; overflow: {{hide ? 'hidden' : 'visible'}};">
-    <!-- 键盘内容懒建：外 if 保证键盘隐藏时整个子树不进 VDOM，首次弹出才创建，
-         之后 keyboardCreated 保活、hide 切换只走内层 show 显隐，不重复重建。 -->
-    <div if="{{!hide || keyboardCreated}}">
-      <div show="{{!hide}}" style="flex-direction: column;" >
+  <!-- 重要：根节点必须直接 show 控制显隐，不要改回 "if 懒建 + 中间包裹 div" 的写法。
+       2cad408 曾改成 <div if="{{!hide || keyboardCreated}}"><div show="{{!hide}}">…，
+       在小米手环 11 固件上整棵键盘子树不会渲染，只在底部留一块空白容器（2026-11 实测）。
+       另外 Vela 的 height 只支持 <length>/<percentage>，不要在这里写 height:auto。 -->
+  <div class="page" style="flex-direction: column;" show="{{!hide}}">
       <div if="{{schemaPickerVisible}}" class="schema-picker-panel" style="height: 305px;">
         <img src="./assets/arc/cn.png" style="position:absolute;top:0px;left:{{(screenWidth - 192)/2 + 9}}px;width:48px;height:42px;" @click="onSchemaPickerCancel" />
         <picker
@@ -100,8 +100,6 @@
         </div>
       </div>
       </block>
-      </div>
-    </div>
   </div>
 </template>
 
@@ -211,21 +209,30 @@ export default {
     },
   },
   onInit() {
-    this.schemaSelected = getSchemaOptionIndex(this.defaultschema)
-    this.currentSchema = schemaOptions[this.schemaSelected].id
-    this.replaceActiveSchema(schemaOptions[this.schemaSelected])
-    this.adjustScreenWidth()
-    // 词库为异步加载：加载完成（单字表或某个整词分片就绪）后重算一次候选。
-    SimpleInputMethod.onDictionaryReady = () => {
-      this.onDictionaryReady();
-    };
-    // 字典懒初始化：进入页面时键盘隐藏(hide=true)，无需建词索引；首次弹出(hide→false)时才 initDict。
-    if (!this.hide) {
-      // 挂载即展开的用法：键盘子树直接创建并保活
-      this.keyboardCreated = true
-      this._ensureDictInit();
+    // 诊断期：把初始化拆进 try/catch，避免个别固件上 getInfo/词库初始化报错导致整个组件不渲染
+    try {
+      this.schemaSelected = getSchemaOptionIndex(this.defaultschema)
+      this.currentSchema = schemaOptions[this.schemaSelected].id
+      this.replaceActiveSchema(schemaOptions[this.schemaSelected])
+      this.adjustScreenWidth()
+      // 词库为异步加载：加载完成（单字表或某个整词分片就绪）后重算一次候选。
+      SimpleInputMethod.onDictionaryReady = () => {
+        this.onDictionaryReady();
+      };
+      // 字典懒初始化：进入页面时键盘隐藏(hide=true)，无需建词索引；首次弹出(hide→false)时才 initDict。
+      if (!this.hide) {
+        // 挂载即展开的用法：键盘子树直接创建并保活
+        this.keyboardCreated = true
+        this._ensureDictInit();
+      }
+    } catch (e) {
+      console.error('InputMethod onInit error:', e && e.message ? e.message : e)
     }
-    this.$watch("hide", "watchHidePropsChange");
+    try {
+      this.$watch("hide", "watchHidePropsChange");
+    } catch (e) {
+      console.error('InputMethod $watch error:', e && e.message ? e.message : e)
+    }
   },
   replaceActiveSchema(option) {
     this.__activeSchemaIndex = option.schema
