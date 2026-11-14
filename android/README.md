@@ -44,7 +44,7 @@ android/app/build/outputs/apk/release/app-release.apk
 仓库里已经放了一份构建结果：
 
 ```
-dist/com.zyz4.notebook.release.2.2.0.apk
+dist/com.zyz4.notebook.release.2.2.3.apk
 ```
 
 ## 3. 签名与包名
@@ -53,7 +53,7 @@ dist/com.zyz4.notebook.release.2.2.0.apk
 - 签名：`android/keystore/notebook.p12` 由仓库内 `sign/private.pem` 和
   `sign/certificate.pem` 生成；证书 SHA-256 与原 APK 一致：
   `483ebb32069ff38f6a44be4d79028d96539a9afa8746b92b2b1fbb2351bc7ffc`。
-- 因此新 APK 可以直接覆盖安装旧版（versionCode 7 > 6），并且能与手环 RPK 建立
+- 因此新 APK 可以直接覆盖安装旧版（versionCode 8 > 6），并且能与手环 RPK 建立
   interconnect 通信。
 
 重新生成 keystore（如果需要）：
